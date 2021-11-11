@@ -1,9 +1,36 @@
 from random import choice
 from src.core.nodes import *
 from ..consts import *
+from ..utils import spritesheet_slice
 
 
-class Player(KinematicBody):
+class Char(KinematicBody):
+    sprite: Sprite
+
+    class SpriteSheetLoadError(UserWarning):
+        '''Fail Loading SpriteSheet. Color Code do Not Match'''
+        pass
+
+    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 name: str = 'Player', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color('#0d89c6')) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+
+        # Set the Sprite
+        atlas: AtlasBook = AtlasBook()
+        self.sprite = Sprite(atlas=atlas)
+        slices: list[dict] = spritesheet_data.get(str(self.color))
+
+        if slices:
+            spritesheet_slice(spritesheet, slices, self.sprite.atlas)
+            atlas.set_current_animation('char_idle')
+        else:
+            warnings.warn('spritesheet load error', Char.SpriteSheetLoadError)
+
+        self.add_child(self.sprite)
+
+
+class Player(Char):
     '''Objeto único de jogo. É o ator/ personagem principal controlado pelo jogador.'''
     JUMP: str = "jump"
     GRAVITY: float = 0.1
@@ -13,14 +40,11 @@ class Player(KinematicBody):
     died: Entity.Signal
 
     _velocity: array
-    _jump_strength: float = 0.0
     _floor: float
     _start_position: tuple[int, int]
 
     was_collided: bool = False
     speed: float = 1.0
-    jump_force: float = 5.0
-    sprite: Sprite
 
     score_sfx: Sound = None
     death_sfx: Sound = None
@@ -35,15 +59,9 @@ class Player(KinematicBody):
         super()._process()
 
     def _physics_process(self) -> None:
-        self._move_()
-
-    def _move(self) -> None:
-        self.position = array(
-            [self._run(self.position[X]), self._jump(self.position[Y])], dtype=int)
-
-    def _float(self) -> None:
         position: list = [self.position[0], self.position[1]]
 
+        # Move
         for i in range(2):
             position[i] += self._velocity[i] * self.speed
 
@@ -64,39 +82,8 @@ class Player(KinematicBody):
 
         return x
 
-    def _jump(self, y: float) -> float:
-
-        if y < self._floor:
-            # Aplicação da gravidade quando não está no chão
-            self._velocity[Y] -= self.GRAVITY
-
-        y = min((y - self._velocity[Y], self._floor))
-        self._velocity[Y] += self._jump_strength * 0.1
-
-        if self._jump_strength > 0.0:
-            self._jump_strength = max((self._jump_strength - lerp(
-                self._jump_strength, 0.0, self.GRAVITY), 0.0))
-
-            if self._jump_strength < 0.2:
-                self._jump_strength = 0.0
-
-        return y
-
     def _input(self) -> None:
-        self._apply_velocity_()
-
-    def _apply_x_velocity(self) -> None:
-        self._velocity[X] = Input.get_input_strength()[0]
-
-    def _apply_xy_velocity(self) -> None:
         self._velocity = Input.get_input_strength()
-
-    def _input_event(self, event: InputEvent) -> None:
-
-        if event.tag is self.JUMP and self.position[Y] >= self._floor:
-            # Reseta a velocidade com o impulso do pulo
-            self._velocity[Y] -= self._velocity[Y]
-            self._jump_strength = self.jump_force
 
     def _on_Body_collided(self, body: KinematicBody) -> None:
         global root, ENEMY_GROUP
@@ -124,11 +111,18 @@ class Player(KinematicBody):
     def get_points(self) -> None:
         return self._points
 
-    def __init__(self, score_sfx: Sound, death_sfx: Sound, spritesheet: Surface,
-                 name: str = 'Player', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = (15, 92, 105)) -> None:
+    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 score_sfx: Sound, death_sfx: Sound, name: str = 'Char',
+                 coords: tuple[int, int] = VECTOR_ZERO, color: Color = Color('#6acd5bff')) -> None:
         global root, input, root, SPRITE_SIZE, SPRITES_SCALE, PLAYER_GROUP
-        super().__init__(name, coords=coords, color=color)
+        super().__init__(spritesheet, spritesheet_data,
+                         name=name, coords=coords, color=color)
+
+        # Set Sprite Group
+        self.sprite.group = PLAYER_GROUP
+
+        # Set Scene Tree Group
+        root.add_to_group(self, PLAYER_GROUP)
 
         self.score_sfx = score_sfx
         self.death_sfx = death_sfx
@@ -139,22 +133,15 @@ class Player(KinematicBody):
         self._floor = self.position[Y]
         self._start_position = coords
 
-        input.register_event(self, KEYDOWN, K_SPACE, self.JUMP)
+        # TODO -> Shoot
+        # input.register_event(self, KEYDOWN, K_SPACE, self.JUMP)
         self.collided.connect(self, self, self._on_Body_collided)
-
-        # Set the Sprite
-        sprite: Sprite = Sprite()
-        sprite.atlas.add_spritesheet(
-            spritesheet, h_slice=3, sprite_size=SPRITE_SIZE)
-        sprite.group = PLAYER_GROUP
-        self.sprite = sprite
-        root.add_to_group(self, PLAYER_GROUP)
-        self.add_child(sprite)
 
         # Set the Shape
         shape: Shape = Shape()
-        rect: Rect = Rect(sprite.atlas.rect)
-        rect.size -= array([16, 16])
+        # rect: Rect = Rect(sprite.atlas.rect)
+        rect: Rect = Rect(VECTOR_ZERO, array(VECTOR_ONE) * 16)
+        # rect.size -= array([16, 16])
         shape.rect = rect
         self.add_child(shape)
 
@@ -163,19 +150,8 @@ class Player(KinematicBody):
         self.scored = Entity.Signal(self, 'scored')
         self.died = Entity.Signal(self, 'died')
 
-        # Connections
-
-        # Shift methods when testing
-        self._move_: Callable
-        self._apply_velocity_: Callable
-
         if IS_DEV_MODE_ENABLED:
-            self._move_ = self._float
-            self._apply_velocity_ = self._apply_xy_velocity
             self.speed += 1.0
-        else:
-            self._move_ = self._move
-            self._apply_velocity_ = self._apply_x_velocity
 
     points: property = property(get_points, set_points)
 

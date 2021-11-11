@@ -5,7 +5,6 @@ import pygame
 from pygame import Color
 from pygame import Surface
 from pygame import sprite
-from pygame.mixer import Sound
 from pygame.locals import *
 from sys import exit, argv
 
@@ -104,7 +103,7 @@ class Entity:
         def __init__(self, owner, name: str) -> None:
             self.owner = owner
             self.name = name
-            self._observers: dict[Node, tuple[Callable, ]] = {}
+            self._observers: dict[Entity, tuple[Callable, ]] = {}
 
     def _draw(self, target_pos: tuple[int, int] = None, target_scale: tuple[float, float] = None,
               offset: tuple[int, int] = None) -> None:
@@ -430,52 +429,16 @@ class Input:
         return cls._instance
 
 
-class Atlas(sprite.Sprite):
-    '''Classe do PyGame responsável por gerenciar sprites e suas texturas.'''
-    base_size: array
-    is_paused: bool = False
-    _static: bool = True
-    _speed: float = 0.06
-    _current_time: float = 0.0
-
-    def update(self) -> None:
-        '''Processamento dos quadros da animação.'''
-
-        if self._static or self.is_paused:
-            return
-
-        self._current_time = (self._current_time +
-                              self._speed) % len(self.textures)
-        self._frame = int(self._current_time)
-        self.__update_frame()
-
-    def _update_frame(self) -> None:
-        '''Método auxiliar para atualização dos quadros.'''
-
-        if self.textures:
-            self.__update_frame()
-
-    def __update_frame(self) -> None:
-        ''''Atualiza um frame da animação.'''
-        self.image: Surface = self.textures[self.frame]
-        self.rect = self.image.get_rect()
-        self.base_size = array(self.image.get_size())
-
-    def add_texture(self, *paths: str) -> None:
-        '''Adciona uma textura ao atlas.'''
-
-        for path in paths:
-            self.textures.append(pygame.image.load(path))
-
-        if len(self.textures) > 1:
-            self._static = False
-
-        self._update_frame()
+class TextureSequence:
+    '''Data Resource (apenas armazena os dados) para animações sequenciais simples.'''
+    frame: int = 0
+    speed: float
+    DEFAULT_SPEED: float = 0.06
 
     def add_spritesheet(self, texture: Surface, h_slice: int = 1, v_slice: int = 1,
                         coords: tuple[int, int] = VECTOR_ZERO,
                         sprite_size: tuple[int, int] = None) -> None:
-        '''Realiza o fatiamento da textura de uma spritesheet como sprites de uma animação.'''
+        '''Realiza o fatiamento da textura de uma spritesheet como a sequencia de sprites.'''
 
         if sprite_size is None:
             sprite_size = (texture.get_width() / h_slice,
@@ -486,10 +449,91 @@ class Atlas(sprite.Sprite):
                 self.textures.append(texture.subsurface(
                     array(coords) + (i, j) * array(sprite_size), sprite_size))
 
-            if len(self.textures) > 1:
-                self._static = False
+    def add_texture(self, *paths: str) -> None:
 
-            self._update_frame()
+        for path in paths:
+            self.textures.append(pygame.image.load(path))
+
+    def set_textures(self, value: list) -> None:
+        self._textures = value
+        self.frame = 0
+
+    def get_textures(self) -> list:
+        return self._textures
+
+    def get_frames(self) -> int:
+        return len(self._textures)
+
+    def get_texture(self) -> Surface:
+        return self._textures[self.frame]
+
+    def __init__(self, speed: float = DEFAULT_SPEED) -> None:
+        self._textures: list = []
+        self.speed = speed
+
+    textures: property = property(get_textures, set_textures)
+
+
+class BaseAtlas(sprite.Sprite):
+    '''Classe do PyGame responsável por gerenciar sprites e suas texturas.'''
+    base_size: array
+    is_paused: bool = False
+
+    _static: bool = True
+    _current_time: float = 0.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.base_size = array(VECTOR_ZERO)
+
+
+class Atlas(BaseAtlas):
+    '''Atlas com uma única sequência simples de animação, ou único sprite estático.'''
+    sequence: TextureSequence
+
+    def update(self) -> None:
+        '''Processamento dos quadros da animação.'''
+
+        if self._static or self.is_paused:
+            return
+
+        self._current_time = (
+            self._current_time + self.sequence.speed) % self.sequence.get_frames()
+        self.sequence.frame = int(self._current_time)
+        self.__update_frame()
+
+    def _update_frame(self) -> None:
+        '''Método auxiliar para atualização dos quadros.'''
+
+        if self.sequence.textures:
+            self.__update_frame()
+
+    def __update_frame(self) -> None:
+        ''''Atualiza um frame da animação.'''
+        self.image: Surface = self.sequence.get_texture()
+        self.rect = self.image.get_rect()
+        self.base_size = array(self.image.get_size())
+
+    def add_texture(self, *paths: str) -> None:
+        '''Adciona uma textura ao atlas.'''
+        self.sequence.add_texture(paths)
+
+        if self.sequence.get_frames() > 1:
+            self._static = False
+
+        self._update_frame()
+
+    def add_spritesheet(self, texture: Surface, h_slice: int = 1, v_slice: int = 1,
+                        coords: tuple[int, int] = VECTOR_ZERO,
+                        sprite_size: tuple[int, int] = None) -> None:
+        '''Realiza o fatiamento da textura de uma spritesheet como sprites de uma animação.'''
+        self.sequence.add_spritesheet(
+            texture, h_slice, v_slice, coords, sprite_size)
+
+        if self.sequence.get_frames() > 1:
+            self._static = False
+
+        self._update_frame()
 
     def load_spritesheet(self, path: str, h_slice: int = 1, v_slice: int = 1,
                          coords: tuple[int, int] = VECTOR_ZERO,
@@ -499,40 +543,120 @@ class Atlas(sprite.Sprite):
             path), h_slice=h_slice, v_slice=v_slice, coords=coords, sprite_size=sprite_size)
 
     def set_textures(self, value: list) -> None:
-        self._textures = value
-        self._frame = 0
-        self._static = len(self._textures) <= 1
+        self.sequence.textures = value
+        self._static = self.sequence.get_frames() <= 1
         self._update_frame()
 
     def get_textures(self) -> list:
-        return self._textures
+        return self.sequence._textures
 
     def set_frame(self, value: int) -> None:
 
-        if value > len(self._textures):
+        if value > self.sequence.get_frames():
             return
 
-        self._frame = value
-        self._current_time = float(self._frame)
+        self.sequence.frame = value
+        self._current_time = float(value)
         self._update_frame()
 
     def get_frame(self) -> int:
-        return self._frame
+        return self.sequence.frame
 
     def __init__(self) -> None:
         super().__init__()
-        self._frame: int = 0
-        self._textures: list = []
-        self.base_size = array([0, 0])
+        self.sequence = TextureSequence()
 
     frame: property = property(get_frame, set_frame)
     textures: property = property(get_textures, set_textures)
 
 
+class AtlasBook(BaseAtlas):
+    '''Atlas composto por múltiplas animações de sprites.'''
+    is_paused: bool = False
+    animations: dict[str, TextureSequence]
+    _current_sequence: TextureSequence = None
+
+    def update(self) -> None:
+        '''Processamento dos quadros da animação.'''
+
+        if self._static or self.is_paused:
+            return
+
+        self._current_time = (
+            self._current_time + self._current_sequence.speed) % self._current_sequence.get_frames()
+        self._current_sequence.frame = int(self._current_time)
+        self.__update_frame()
+
+    def _update_frame(self) -> None:
+        '''Método auxiliar para atualização dos quadros.'''
+
+        if self._current_sequence.textures:
+            self.__update_frame()
+
+    def __update_frame(self) -> None:
+        ''''Atualiza um frame da animação.'''
+        self.image: Surface = self._current_sequence.get_texture()
+        self.rect = self.image.get_rect()
+        self.base_size = array(self.image.get_size())
+
+    def add_animation(self, name: str, texture: Surface, h_slice: int = 1, v_slice: int = 1,
+                      coords: tuple[int, int] = VECTOR_ZERO, sprite_size: tuple[int, int] = None,
+                      speed: float = TextureSequence.DEFAULT_SPEED) -> None:
+        '''Adciona uma animação ao atlas, com base em uma spritesheet
+        (aplicando o fatiamento indicado).'''
+        sequence: TextureSequence = TextureSequence(speed)
+        sequence.add_spritesheet(
+            texture, h_slice, v_slice, coords, sprite_size)
+        self.animations[name] = sequence
+        self._current_sequence = sequence
+
+        if sequence.get_frames() > 1:
+            self._static = False
+
+        self._update_frame()
+
+    def append_animation_frames(self, name: str, texture: Surface, h_slice: int = 1,
+                                v_slice: int = 1, coords: tuple[int, int] = VECTOR_ZERO,
+                                sprite_size: tuple[int, int] = None) -> None:
+
+        if name in self.animations:
+            self.animations[name].add_spritesheet(
+                texture, h_slice, v_slice, coords, sprite_size)
+        else:
+            self.add_animation(name, texture, h_slice,
+                               v_slice, coords, sprite_size)
+
+    def set_current_animation(self, name: str) -> None:
+        '''Determina a animação atual, se a animação indicada
+        não for encontrada resultará em erro.'''
+
+        self._current_sequence = self.animations[name]
+        self._static = self._current_sequence.get_frames() <= 1
+        self._update_frame()
+
+    def set_frame(self, value: int) -> None:
+
+        if value > self._current_sequence.get_frames():
+            return
+
+        self._current_sequence.frame = value
+        self._current_time = float(value)
+        self._update_frame()
+
+    def get_frame(self) -> int:
+        return self._current_sequence.frame
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.animations = {}
+
+    frame: property = property(get_frame, set_frame)
+
+
 class Sprite(Node):
     '''Nó que configura um sprite do Pygame como um objeto de jogo
     (que pode ser inserido na árvore da cena).'''
-    atlas: Atlas
+    atlas: BaseAtlas
     group: str
 
     def _enter_tree(self) -> None:
@@ -559,11 +683,17 @@ class Sprite(Node):
     def get_cell(self) -> array:
         return array(self.atlas.base_size)
 
-    def __init__(self, name: str = 'Sprite', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def __init__(self, name: str = 'Sprite', coords: tuple[int, int] = VECTOR_ZERO,
+                 atlas: BaseAtlas = None) -> None:
         global root
         super().__init__(name=name, coords=coords)
 
-        self.atlas = Atlas()
+        # REFACTOR -> Tornar o tipo de atlas mandatório, ou alterar o tipo default para `AtlasBook`.`
+        if atlas:
+            self.atlas = atlas
+        else:
+            self.atlas = Atlas()
+
         self.group = root.DEFAULT_GROUP
 
 
