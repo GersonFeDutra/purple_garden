@@ -15,3 +15,5 @@ CENTER_LEFT: tuple[float, float] = .5, 0.
 # Coords aliases
 X: int = 0
 Y: int = 1
+W: int = 2
+H: int = 3

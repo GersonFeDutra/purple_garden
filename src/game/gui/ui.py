@@ -18,11 +18,11 @@ class GameOverDisplay(Node):
     def show(self) -> None:
         self.add_child(self.label)
 
-    def __init__(self, name: str = 'GameOverDisplay', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def __init__(self, font: font.Font, name: str = 'GameOverDisplay', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         global root
         super().__init__(name=name, coords=coords)
 
-        self.label = Label(coords=array(root.screen_size) // 2,
+        self.label = Label(font, coords=array(root.screen_size) // 2,
                            color=colors.BLACK, text='Game Over')
         self.label.anchor = CENTER
         # self.label.position = array(SCREEN_SIZE) // 2 - \

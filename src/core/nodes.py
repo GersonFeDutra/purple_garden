@@ -1,16 +1,13 @@
 from typing import Callable
-from numpy.lib.type_check import _is_type_dispatcher
 
 import pygame
-from pygame import Color
-from pygame import Surface
-from pygame import sprite
+from pygame import Color, Surface, Vector2
+from pygame import sprite, draw, font
 from pygame.locals import *
 from sys import exit, argv
 
 # Other imports
 import warnings
-from os import path
 from enum import IntEnum
 from numpy import array
 from numpy.linalg import norm
@@ -111,7 +108,7 @@ class Entity:
         Recebe uma posição, escala e deslocamento pré-calculados.'''
         global root
 
-        if not IS_DEBUG_ENABLED:
+        if not self._draw_cell:
             return
 
         cell: array = self.get_cell()
@@ -124,12 +121,12 @@ class Entity:
 
         # Desenha o Gizmo
         extents: array = GIZMO_RADIUS * target_scale
-        pygame.draw.line(root.screen, self.color,
-                         (target_pos[X] - extents[X], target_pos[Y]),
-                         (target_pos[X] + extents[X], target_pos[Y]))
-        pygame.draw.line(root.screen, self.color,
-                         (target_pos[X], target_pos[Y] - extents[Y]),
-                         (target_pos[X], target_pos[Y] + extents[Y]))
+        draw.line(root.screen, self.color,
+                  (target_pos[X] - extents[X], target_pos[Y]),
+                  (target_pos[X] + extents[X], target_pos[Y]))
+        draw.line(root.screen, self.color,
+                  (target_pos[X], target_pos[Y] - extents[Y]),
+                  (target_pos[X], target_pos[Y] + extents[Y]))
 
         if cell[X] != 0 or cell[Y] != 0:
             # Desenha as bordas da caixa delimitadora
@@ -173,6 +170,7 @@ class Entity:
         self.anchor = array(CENTER)
         self.color = Color(0, 185, 225, 125)
         self._debug_fill_bounds: bool = False
+        self._draw_cell = IS_DEBUG_ENABLED
 
 
 class Node(Entity):
@@ -199,7 +197,7 @@ class Node(Entity):
         pass
 
     class DuplicatedChild(InvalidChild):
-        '''Lançado ao tentar inserir um filho de mesmo nome'''
+        '''Lançado ao tentar inserir um filho de mesmo nome.'''
         pass
 
     def add_child(self, node, at: int = -1) -> None:
@@ -263,14 +261,14 @@ class Node(Entity):
     def get_parent(self):
         return self._parent
 
-    def get_global_position(self) -> list:
+    def get_global_position(self) -> tuple[int, int]:
         '''Calcula a posição do nó, considerando a hierarquia
         (posições relativas aos nós ancestrais.'''
 
         if self._parent:
             return self._parent.get_global_position() + self.position
         else:
-            return self.position
+            return tuple(self.position)
 
     # def _parent
 
@@ -429,6 +427,76 @@ class Input:
         return cls._instance
 
 
+class Control(Node):
+    '''Nó Base para subtipos de Interface Gráfica do Usuário (GUI).'''
+    size: tuple[int, int]
+
+    def get_cell(self) -> tuple[int, int]:
+        return self.size
+
+    def __init__(self, name: str = 'Control', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+        self.anchor = array(TOP_LEFT)
+
+
+class Grid(Control):
+    '''Contêiner que posiciona seus nós filhos em layout de grade.'''
+    rows: int = 1
+    cell_space: tuple[int, int] = VECTOR_ZERO
+
+    def add_child(self, node: Node, at: int = -1) -> None:
+        super().add_child(node, at=at)
+
+        self.cell_space = max(self.cell_space[X], node.get_cell()[X]), max(
+            self.cell_space[Y], node.get_cell()[Y])
+        self.update_container()
+
+        # Updates the size
+        self.size = array(self.cell_space)
+        self.size[X] *= self.rows
+        self.size[Y] *= len(self._children_index) // self.rows
+
+    def remove_child(self, node=None, at: int = -1) -> Node:
+        node: Node = super().remove_child(node=node, at=at)
+        self.update_container()
+
+        return node
+
+    def update_container(self) -> None:
+        current_pos: array = array(VECTOR_ZERO)
+        counter: int = 0
+
+        for child in self._children_index:
+            child.position = current_pos
+            counter += 1
+            current_pos = array(current_pos)
+
+            if counter < self.rows:
+                current_pos[X] += self.cell_space[X]
+            else:
+                counter = 0
+                current_pos[X] = 0
+                current_pos[Y] += self.cell_space[Y]
+
+    def set_rows(self, value: int) -> None:
+        self._rows = value
+
+        # Updates the size
+        self.size = array(self.cell_space)
+        self.size[X] *= value
+        self.size[Y] *= len(self._children_index) // value
+
+    def get_rows(self) -> int:
+        return self._rows
+
+    def __init__(self, name: str = 'Grid', coords: tuple[int, int] = VECTOR_ZERO,
+                 rows: int = 1) -> None:
+        super().__init__(name=name, coords=coords)
+        self._rows: int = rows
+
+    rows: property = property(get_rows, set_rows)
+
+
 class TextureSequence:
     '''Data Resource (apenas armazena os dados) para animações sequenciais simples.'''
     frame: int = 0
@@ -468,7 +536,7 @@ class TextureSequence:
         return self._textures[self.frame]
 
     def __init__(self, speed: float = DEFAULT_SPEED) -> None:
-        self._textures: list = []
+        self._textures: list[Surface] = []
         self.speed = speed
 
     textures: property = property(get_textures, set_textures)
@@ -477,19 +545,53 @@ class TextureSequence:
 class BaseAtlas(sprite.Sprite):
     '''Classe do PyGame responsável por gerenciar sprites e suas texturas.'''
     base_size: array
-    is_paused: bool = False
-
-    _static: bool = True
-    _current_time: float = 0.0
 
     def __init__(self) -> None:
         super().__init__()
         self.base_size = array(VECTOR_ZERO)
 
 
+class Icon(BaseAtlas):
+    '''Atlas básico para imagens estáticas. Pode comportar múltiplas texturas,
+    requer manipulação externa da lista.'''
+    textures: list[Surface]
+
+    @staticmethod
+    def get_spritesheet(texture: Surface, h_slice: int = 1, v_slice: int = 1,
+                        coords: tuple[int, int] = VECTOR_ZERO,
+                        sprite_size: tuple[int, int] = None) -> list[Surface]:
+        '''Realiza o fatiamento da textura de uma spritesheet como a sequencia de surfaces.'''
+        sheet: list[Surface] = []
+
+        if sprite_size is None:
+            sprite_size = (texture.get_width() / h_slice,
+                           texture.get_height() / v_slice)
+
+        for i in range(h_slice):
+            for j in range(v_slice):
+                sheet.append(texture.subsurface(array(coords) +
+                             (i, j) * array(sprite_size), sprite_size))
+
+        return sheet
+
+    def set_texture(self, id: int) -> None:
+        self.image: Surface = self.textures[id]
+        self.rect = self.image.get_rect()
+        self.base_size = array(self.image.get_size())
+
+    def __init__(self, textures: list[Surface]) -> None:
+        super().__init__()
+        self.textures = textures
+        self.set_texture(len(textures) - 1)
+
+
 class Atlas(BaseAtlas):
     '''Atlas com uma única sequência simples de animação, ou único sprite estático.'''
     sequence: TextureSequence
+    is_paused: bool = False
+
+    _static: bool = True
+    _current_time: float = 0.0
 
     def update(self) -> None:
         '''Processamento dos quadros da animação.'''
@@ -575,6 +677,9 @@ class AtlasBook(BaseAtlas):
     is_paused: bool = False
     animations: dict[str, TextureSequence]
     _current_sequence: TextureSequence = None
+
+    _static: bool = True
+    _current_time: float = 0.0
 
     def update(self) -> None:
         '''Processamento dos quadros da animação.'''
@@ -797,6 +902,67 @@ class VisibilityNotifier(Shape):
         self._shift: Callable = self.set_on_screen
 
 
+class ProgressBar(Control):
+    bar: Shape
+    bg: Shape
+    borders: Shape
+
+    def set_progress(self, value: float) -> None:
+        self._progress = value
+        self.bar.base_size[self._grow_coord] = self._base_size[self._grow_coord] * value
+
+    def get_progress(self) -> float:
+        return self._progress
+
+    def __init__(self, name: str = 'ProgressBar', coords: tuple[int, int] = VECTOR_ZERO,
+                 bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
+                 borders_color: Color = colors.RED, v_grow: bool = False,
+                 size: tuple[int, int] = (125, 25),
+                 borders: tuple[int, int, int, int] = (2, 2, 2, 2)) -> None:
+        super().__init__(name=name, coords=coords)
+        self.color = bg_color
+        self.size = size
+
+        self._progress: float = .5
+        self._grow_coord: int = int(v_grow)
+
+        topleft: array = array((borders[X], borders[Y]))
+        base_size: array = size - (topleft + (borders[W], borders[H]))
+        self._base_size: array = base_size
+
+        # Set the border square
+        bar: Shape = Shape(name='Borders')
+        bar.anchor = array(TOP_LEFT)
+        bar.color = borders_color
+        bar.rect = Rect(VECTOR_ZERO, size)
+        bar._draw_cell = True
+        self.borders = bar
+        self.add_child(bar)
+
+        # Set the BG
+        bar: Shape = Shape(name='BG', coords=topleft)
+        bar.anchor = array(TOP_LEFT)
+        bar.color = bg_color
+        bar.rect = Rect(topleft, base_size)
+        bar._draw_cell = True
+        self.bg = bar
+        self.add_child(bar)
+
+        # Set the Inner Bar
+        bar: Shape = Shape(name='Bar', coords=topleft)
+        bar.anchor = array(TOP_LEFT)
+        bar.color = bar_color
+        bar.rect = Rect(topleft, base_size)
+        bar._draw_cell = True
+        self.bar = bar
+        self.add_child(bar)
+
+        # Updates the progress
+        self.set_progress(self._progress)
+
+    progress: property = property(get_progress, set_progress)
+
+
 class KinematicBody(Node):
     '''Nó com capacidades físicas (permite colisão).'''
     collided: Entity.Signal
@@ -886,9 +1052,10 @@ class KinematicBody(Node):
         self._cached_bounds: Rect = None
 
 
+# TODO -> Tornar a Label um Nó Control
 class Label(Node):
     '''Nó usado para apresentar texto na tela.'''
-    font: pygame.font.Font = pygame.font.SysFont('roboto', 40, False, False)
+    font: font.Font
 
     def set_text(self, value: str) -> None:
         self._text = value
@@ -917,9 +1084,10 @@ class Label(Node):
     def get_cell(self) -> tuple[int, int]:
         return self._surface().get_size()
 
-    def __init__(self, name: str = 'Label', coords: tuple[int, int] = VECTOR_ZERO,
+    def __init__(self, font: font.Font, name: str = 'Label', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = colors.WHITE, text: str = '') -> None:
         super().__init__(name=name, coords=coords)
+        self.font = font
         self.color = color
         self.anchor = array(TOP_LEFT)
 
@@ -1106,9 +1274,12 @@ class SceneTree(Node):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
         pass
 
-    def start(self, title: str = 'Game') -> None:
+    def start(self, title: str = 'Game', screen_size: tuple[int, int] = None) -> None:
         '''Setups the basic settings.'''
         self.clock = pygame.time.Clock()
+
+        if not (screen_size is None):
+            self.screen_size = screen_size
 
         self.screen = pygame.display.set_mode(self.screen_size)
         #alpha_layer = Surface(SCREEN_SIZE, pygame.SRCALPHA)
@@ -1181,10 +1352,9 @@ class SceneTree(Node):
         '''Verifica se o nó pertence a um grupo determinado.'''
         return group in node._current_groups
 
-    def set_screen_size(self, width: int, height: int) -> None:
-        self._screen_width = width
-        self._screen_height = height
-        self._screen_rect.topleft = width, height
+    def set_screen_size(self, value: tuple[int, int]) -> None:
+        self._screen_width, self._screen_height = value
+        self._screen_rect.topleft = value
 
     def get_screen_size(self) -> tuple[int, int]:
         return self._screen_width, self._screen_height
@@ -1199,7 +1369,6 @@ class SceneTree(Node):
 
     def __init__(self, name: str = 'root', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-
         self._is_on_tree = True
 
         # Events

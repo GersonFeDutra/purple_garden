@@ -1,3 +1,4 @@
+from pygame.mixer import Sound
 from random import choice
 from src.core.nodes import *
 from ..consts import *

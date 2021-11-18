@@ -1,6 +1,6 @@
 import json
 
-from pygame.image import load
+from os import path
 from pygame.mixer import Sound
 from src.core.nodes import *
 from src.game.objects.chars import *
@@ -47,7 +47,8 @@ def fetch_spritesheet(from_path: str) -> dict[str, list[dict]]:
 
 
 # Setup the Engine
-root.start(TITLE)
+root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
+# root.start(TITLE, screen_size=array(BASE_SIZE) * 2)
 
 # %%
 # Setup Game's Content
@@ -57,6 +58,7 @@ ROOT_DIR: str = path.dirname(__file__)
 ASSETS_DIR: str = path.join(ROOT_DIR, 'assets')
 SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
 SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
+DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
 
 spritesheet_data: dict[str, list[dict]] = fetch_spritesheet(
     path.join(SPRITES_DIR, 'sheet1.json'))
@@ -95,8 +97,46 @@ player: Player = Player(spritesheet, spritesheet_data, score_sfx, death_sfx, coo
 player.scale = array(SPRITES_SCALE)
 
 # GUI
-label: Label = Label((40, 40), color=colors.BLACK, text='Points: 0')
-display: GameOverDisplay = GameOverDisplay()
+MAX_KEY_ITEMS: int = 10
+
+# label: Label = Label((240, 240), color=colors.BLACK, text='Points: 0')
+
+# Bars
+BAR_THICKNESS: int = 25
+BAR_OFFSET: tuple = BAR_THICKNESS, BAR_THICKNESS
+TAG_FONTS: font.Font = font.SysFont('roboto', 20, False, False)
+bar: ProgressBar = ProgressBar(coords=(BAR_OFFSET[X] * 3, BAR_OFFSET[Y]), size=(
+    root._screen_width - BAR_OFFSET[X] * 4, BAR_THICKNESS))
+o2_bar: ProgressBar = ProgressBar(name='O2Bar', coords=(
+    BAR_OFFSET[X], BAR_OFFSET[Y] * 2), v_grow=True,
+    size=(BAR_THICKNESS, root._screen_height - BAR_OFFSET[Y] * 3))
+o2_label: Label = Label(TAG_FONTS, name='O2Label',
+                        coords=BAR_OFFSET, color=colors.CYAN, text='O²')
+nl2_bar: ProgressBar = ProgressBar(name='Nl2Bar', coords=(
+    int(BAR_OFFSET[X] * 3.5), BAR_OFFSET[Y] * 3), size=(BAR_THICKNESS * 7, BAR_THICKNESS))
+nl2_label: Label = Label(TAG_FONTS, name='Nl2Label', coords=nl2_bar.position +
+                         (nl2_bar.size[X], 0), color=colors.BLUE, text='NL²')
+
+key_items: Grid = Grid(
+    coords=(int(BAR_OFFSET[X] * 3.8), BAR_OFFSET[Y] * 5), rows=MAX_KEY_ITEMS // 2)
+
+violet_color_key = str(Color('#fe5b59ff'))
+if violet_color_key in spritesheet_data:
+
+    for i in range(MAX_KEY_ITEMS):
+        slice: dict = spritesheet_data[violet_color_key][0]
+        n_slices: int = int(slice['data'])
+        bounds: dict[str, int] = slice['keys'][0]['bounds']
+        item_textures: list[Surface] = Icon.get_spritesheet(spritesheet, v_slice=n_slices, coords=(
+            bounds['x'], bounds['y']), sprite_size=(bounds['w'], bounds['h'] / n_slices))
+        item: Sprite = Sprite(name=f'Item{i}', atlas=Icon(item_textures))
+        item.anchor = array(TOP_LEFT)
+        key_items.add_child(item)
+
+else:
+    warnings.warn('color not found')
+
+display: GameOverDisplay = GameOverDisplay(DEFAULT_FONT)
 
 
 # %%
@@ -105,12 +145,18 @@ root.add_child(bg)
 # root.add_child(spawn)
 root.add_child(player)
 root.add_child(spawner)
-root.add_child(label)
+# root.add_child(label)
+root.add_child(o2_label)
+root.add_child(nl2_label)
+root.add_child(bar)
+root.add_child(o2_bar)
+root.add_child(nl2_bar)
+root.add_child(key_items)
 root.add_child(display)
 
 # Conexões
 # spawn.connect(spawn.collected, score_sfx, score_sfx.play)
-player.connect(player.points_changed, label, label.set_text)
+# player.connect(player.points_changed, label, label.set_text)
 player.connect(player.scored, bg, bg.speed_up)
 player.connect(player.scored, spawner, spawner.speed_up)
 player.connect(player.died, display, display.show)
