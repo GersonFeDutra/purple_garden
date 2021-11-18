@@ -909,6 +909,18 @@ class ProgressBar(Control):
 
     def set_progress(self, value: float) -> None:
         self._progress = value
+        self._update_progress(value)
+
+    def update_progress(self, value: float) -> None:
+        '''Atualiza o tamanho da barra de progresso de forma ascendente.'''
+        self.bar.base_size[self._grow_coord] = self._base_size[self._grow_coord] * value
+
+    def update_progress_flip(self, value: float) -> None:
+        '''Atualiza o tamanho da barra de progresso de forma descendente.'''
+        base_size: int = self._base_size[self._grow_coord]
+        length: int = base_size * value
+
+        self.bar.position[self._grow_coord] = base_size - length
         self.bar.base_size[self._grow_coord] = self._base_size[self._grow_coord] * value
 
     def get_progress(self) -> float:
@@ -916,7 +928,7 @@ class ProgressBar(Control):
 
     def __init__(self, name: str = 'ProgressBar', coords: tuple[int, int] = VECTOR_ZERO,
                  bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
-                 borders_color: Color = colors.RED, v_grow: bool = False,
+                 borders_color: Color = colors.RED, v_grow: bool = False, flip: bool = False,
                  size: tuple[int, int] = (125, 25),
                  borders: tuple[int, int, int, int] = (2, 2, 2, 2)) -> None:
         super().__init__(name=name, coords=coords)
@@ -925,6 +937,8 @@ class ProgressBar(Control):
 
         self._progress: float = .5
         self._grow_coord: int = int(v_grow)
+        self._update_progress: Callable = self.update_progress if (
+            flip ^ (not v_grow)) else self.update_progress_flip
 
         topleft: array = array((borders[X], borders[Y]))
         base_size: array = size - (topleft + (borders[W], borders[H]))
@@ -1270,6 +1284,8 @@ class SceneTree(Node):
     tree_pause: int = 0
     groups: dict[str, list[Node]] = {}
 
+    _current_scene: Node = None
+
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
         pass
@@ -1287,6 +1303,11 @@ class SceneTree(Node):
 
     def run(self) -> None:
         '''Game's Main Loop.'''
+
+        if self.current_scene is None:
+            warnings.warn('The Game needs an active scene to be able to run.')
+            return
+
         while True:
             self.clock.tick(self.fixed_fps)
             self.screen.fill(self.screen_color)
@@ -1359,6 +1380,20 @@ class SceneTree(Node):
     def get_screen_size(self) -> tuple[int, int]:
         return self._screen_width, self._screen_height
 
+    # def set_current_scene(self, scene: object, *args, **kwargs) -> None:
+    #     self._current_scene = scene(args, kwargs)
+
+    def set_current_scene(self, scene: Node) -> None:
+
+        if self._current_scene:
+            self.remove_child(self._current_scene)
+
+        self._current_scene = scene
+        self.add_child(scene)
+
+    def get_current_scene(self) -> Node:
+        return self._current_scene
+
     def __new__(cls):
         # Torna a classe em uma Singleton
         if cls._instance is None:
@@ -1375,6 +1410,7 @@ class SceneTree(Node):
         self.pause_toggled = Node.Signal(self, 'pause_toggled')
 
     screen_size: property = property(get_screen_size, set_screen_size)
+    current_scene: property = property(get_current_scene, set_current_scene)
 
 
 # Singletons
