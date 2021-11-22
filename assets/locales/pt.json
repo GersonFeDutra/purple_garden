@@ -1,0 +1,29 @@
+{
+	"START": "Começar",
+	"LANGUAGE": "Idioma",
+	"INFO": "Informações",
+	"CREDITS": "Créditos",
+	"EXIT": "Sair",
+	"CREDITS_TXT": [
+		"Jogo desenvolvido por Gerson\n",
+		"Agradecimentos: Val @sastrun\n",
+		"Professor Roberto Pinheiro\n",
+		"Pressione ESCAPE para retornar!\n"
+	],
+	"INFO_TXT": [
+		"Para mover o personagem pressione as teclas WASD\n",
+		"Use o mouse para mirar, e clique para atirar\n",
+		"(sua munição é limitada)\n",
+		"Interaja com as plantações com a tecla E\n",
+		"(ou botão esquerdo do mouse).\n",
+		"Plante, colha, sobreviva!!!\n",
+		"Pressione ESCAPE para retornar!"
+	],
+	"INFOS": [
+		"Pressione ENTER para jogar!",
+		"Pressione ENTER para mais informações!",
+		"Pressione ENTER para ver os créditos!",
+		"Pressione ENTER para sair!"
+	],
+	"PRESS_TO_PLAY": "Pressione ENTER para jogar!"
+}

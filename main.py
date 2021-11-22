@@ -1,4 +1,5 @@
 import json
+import locale
 
 from os import path
 from pygame.mixer import Sound
@@ -13,7 +14,7 @@ def fetch_spritesheet(from_path: str) -> dict[str, list[dict]]:
     a partir de um arquivo JSON criado no editor Aseprite.'''
     print("Started reading spritesheet JSON file...")
 
-    with open(from_path, "r") as read_file:
+    with open(from_path, 'r') as read_file:
         print("Starting to convert JSON decoding...")
         sheet = json.load(read_file)
 
@@ -45,6 +46,27 @@ def fetch_spritesheet(from_path: str) -> dict[str, list[dict]]:
         return map
 
 
+def fetch_locales(dir: str, locale: str) -> dict[str, str]:
+    print("Started reading locales JSON file...")
+    locales: dict[str, str]
+
+    with open(path.join(dir, f'{locale}.json'), 'r') as read_file:
+        print("Starting to convert JSON decoding...")
+        locales = json.load(read_file)
+        print("Decoded JSON Data From File...")
+
+    return locales
+
+
+def get_locale() -> str:
+    key: str = locale.getdefaultlocale()[0][:2]
+    
+    if key in ['pt', 'en']:
+        return key
+    
+    return 'en' # Fallback to english
+
+
 # Setup the Engine
 root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
 # root.start(TITLE, screen_size=array(BASE_SIZE) * 2)
@@ -55,9 +77,16 @@ root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
 # Loading Resources
 ROOT_DIR: str = path.dirname(__file__)
 ASSETS_DIR: str = path.join(ROOT_DIR, 'assets')
+LOCALES_DIR: str = path.join(ASSETS_DIR, 'locales')
 SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
 SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
+
+GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
 DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
+TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
+
+root.set_load_method(fetch_locales, LOCALES_DIR)
+root.set_locale(get_locale())
 
 spritesheet_data: dict[str, list[dict]] = fetch_spritesheet(
     path.join(SPRITES_DIR, 'sheet1.json'))
@@ -85,11 +114,15 @@ for sfx in ['death', 'score', 'jump']:
 # Sets the first scene.
 
 if IS_DEBUG_ENABLED:
-    root.current_scene = GameWorld(
-        spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT)
+    # root.current_scene = GameWorld(
+    #     spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT, GUI_FONT)
+    root.current_scene = TitleScreen(
+        spritesheet_old, spritesheet, spritesheet_data,
+        sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
 else:
     root.current_scene = TitleScreen(
-        spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT, DEFAULT_FONT)
+        spritesheet_old, spritesheet, spritesheet_data,
+        sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
 
 
 # %%

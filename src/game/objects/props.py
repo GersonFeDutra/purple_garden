@@ -64,7 +64,7 @@ class BackGround(Node):
     def speed_up(self) -> None:
         self.scroll_speed += 1
 
-    def _process(self) -> None:
+    def _process(self, delta: float) -> None:
         global root, SPRITES_SCALE
 
         self.position[X] = self.position[X] - self.scroll_speed

@@ -1,0 +1,29 @@
+{
+	"START": "Start",
+	"LANGUAGE": "Language",
+	"INFO": "Info",
+	"CREDITS": "Créditos",
+	"EXIT": "Exit",
+	"CREDITS_TXT": [
+		"Game developed by Gerson\n",
+		"Special thanks to: Val @sastrun\n",
+		"Professor Roberto Pinheiro\n",
+		"Press ESCAPE to return!\n"
+	],
+	"INFO_TXT": [
+		"To move the character press the WASD keys\n",
+		"use the mouse to aim, and right-click to shoot\n",
+		"(your ammo is limited)\n",
+		"Objects interactions is made by pressing the E key\n",
+		"(or left mouse button).\n",
+		"Plant, harvest, survive!!!\n",
+		"Press ESCAPE to return!"
+	],
+	"INFOS": [
+		"Press ENTER to play!",
+		"Press ENTER to more info!",
+		"Press ENTER to see the credits!",
+		"Press ENTER to exit!"
+	],
+	"PRESS_TO_PLAY": "Press ENTER to play!"
+}

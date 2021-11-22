@@ -50,16 +50,16 @@ class Player(Char):
     score_sfx: Sound = None
     death_sfx: Sound = None
 
-    def _process(self) -> None:
+    def _process(self, delta: float) -> None:
         self.points += 1
 
         if self.points % 500 == 0:
             self.score_sfx.play()
             self.scored.emit()
 
-        super()._process()
+        super()._process(delta)
 
-    def _physics_process(self) -> None:
+    def _physics_process(self, delta: float) -> None:
         position: list = [self.position[0], self.position[1]]
 
         # Move
@@ -161,7 +161,7 @@ class Runner(KinematicBody):
     speed: float = 1.0
     notifier: VisibilityNotifier
 
-    def _physics_process(self) -> None:
+    def _physics_process(self, delta: float) -> None:
         global root
 
         edge: int = self.sprite.get_cell()[X] * self.scale[X]

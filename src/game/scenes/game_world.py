@@ -11,7 +11,7 @@ class GUI(Node):
     game_over_display: GameOverDisplay
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 default_font: font.Font, name: str = 'GUI',
+                 default_font: font.Font, gui_font: font.Font, name: str = 'GUI',
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
         MAX_KEY_ITEMS: int = 10
@@ -21,17 +21,16 @@ class GUI(Node):
         # Bars
         BAR_THICKNESS: int = 25
         BAR_OFFSET: tuple = BAR_THICKNESS, BAR_THICKNESS
-        TAG_FONTS: font.Font = font.SysFont('roboto', 20, False, False)
         bar: ProgressBar = ProgressBar(coords=(BAR_OFFSET[X] * 3, BAR_OFFSET[Y]), size=(
             root._screen_width - BAR_OFFSET[X] * 4, BAR_THICKNESS))
         o2_bar: ProgressBar = ProgressBar(name='O2Bar', coords=(
             BAR_OFFSET[X], BAR_OFFSET[Y] * 2), v_grow=True,
             size=(BAR_THICKNESS, root._screen_height - BAR_OFFSET[Y] * 3))
-        o2_label: Label = Label(TAG_FONTS, name='O2Label',
+        o2_label: Label = Label(gui_font, name='O2Label',
                                 coords=BAR_OFFSET, color=colors.CYAN, text='O²')
         nl2_bar: ProgressBar = ProgressBar(name='Nl2Bar', coords=(
             int(BAR_OFFSET[X] * 3.5), BAR_OFFSET[Y] * 3), size=(BAR_THICKNESS * 7, BAR_THICKNESS))
-        nl2_label: Label = Label(TAG_FONTS, name='Nl2Label', coords=nl2_bar.position +
+        nl2_label: Label = Label(gui_font, name='Nl2Label', coords=nl2_bar.position +
                                  (nl2_bar.size[X], 0), color=colors.BLUE, text='NL²')
         display: GameOverDisplay = GameOverDisplay(default_font)
         self.game_over_display = display
@@ -110,14 +109,14 @@ class GameWorld(Node):
 
     def __init__(self, spritesheet_old: Surface, spritesheet: SubArrayFormat,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
-                 gui_font: font.Font, name: str = 'GameWorld',
+                 default_font: font.Font, gui_font: font.Font, name: str = 'GameWorld',
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-
+        root.screen_color = colors.WHITE
         # Construção da cena
         level: Level = Level(spritesheet_old, spritesheet,
                              spritesheet_data, sound_fxs)
-        gui: GUI = GUI(spritesheet, spritesheet_data, gui_font)
+        gui: GUI = GUI(spritesheet, spritesheet_data, default_font, gui_font)
         self.add_child(level)
         self.add_child(gui)
 

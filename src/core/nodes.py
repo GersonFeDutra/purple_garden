@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Iterator
 
 import pygame
 from pygame import Color, Surface, Vector2
@@ -7,7 +7,9 @@ from pygame.locals import *
 from sys import exit, argv
 
 # Other imports
+import re
 import warnings
+import pytweening as tween
 from enum import IntEnum
 from numpy import array
 from numpy.linalg import norm
@@ -303,7 +305,7 @@ class Node(Entity):
         '''Método virtual chamado quando um determinado evento de entrada ocorrer.'''
         pass
 
-    def _propagate(self, parent_offset: array = array(VECTOR_ZERO),
+    def _propagate(self, delta_time: float, parent_offset: array = array(VECTOR_ZERO),
                    parent_scale: array = array(VECTOR_ONE), tree_pause: int = 0):
         '''Propaga os métodos virtuais na hierarquia da árvore, da seguinte forma:
         Primeiro as entradas são tomadas e então os desenhos são renderizados na tela.
@@ -319,25 +321,26 @@ class Node(Entity):
         self._draw(target_pos, target_scale, offset)
 
         tree_pause = tree_pause | root.tree_pause | self.pause_mode
-        self._subpropagate(target_pos, target_scale,
+        self._subpropagate(delta_time, target_pos, target_scale,
                            physics_helper.children, tree_pause)
 
         if not (tree_pause & Node.PauseModes.STOP or
                 tree_pause & Node.PauseModes.TREE_PAUSED
                 and not(self.pause_mode & Node.PauseModes.CONTINUE)):
 
-            self._process()
+            self._process(delta_time)
 
         return physics_helper.check_collisions()
 
-    def _subpropagate(self, target_pos: array, target_scale: array,
+    def _subpropagate(self, delta_time: float, target_pos: array, target_scale: array,
                       physics_helpers: deque, tree_pause: int) -> None:
         '''Método auxiliar para propagar métodos virtuais nos nós filhos.'''
 
         for child in self._children_index:
-            physics_helpers.append(child._propagate(target_pos, target_scale))
+            physics_helpers.append(child._propagate(
+                delta_time, target_pos, target_scale))
 
-    def _process(self):
+    def _process(self, delta: float) -> None:
         '''Método virtual para processamento de dados em cada passo/ frame.'''
         pass
 
@@ -359,6 +362,13 @@ class Input:
     '''Classe responsável por gerenciar eventos de entrada.'''
     _instance = None
     events: dict = {}
+
+    class Mouse(IntEnum):
+        LEFT_CLICK = 1
+        MIDDLE_CLICK = 2
+        RIGHT_CLICK = 3
+        SCROLL_UP = 4
+        SCROLL_DOWN = 5
 
     class NotANode(Exception):
         '''Lançado ao tentar registrar um evento em um objeto que não e do tipo `Node`.'''
@@ -399,9 +409,10 @@ class Input:
         return strength
 
     def _tick(self) -> None:
-        '''Passo de captura dos inputs, convertendo-os em eventos.'''
+        '''Passo de captura dos inputs, mapeando-os nos eventos e executando-os.'''
 
         for event in pygame.event.get():
+
             if event.type == QUIT:
                 pygame.quit()
                 exit()
@@ -410,11 +421,18 @@ class Input:
             if not event_type:
                 continue
 
-            event_key: list = event_type.get(event.key)
-            if not event_key:
+            # TODO -> Support more PyGame event types
+            event_code: int = {
+                KEYDOWN: lambda e: e.key,
+                KEYUP: lambda e: e.key,
+                MOUSEBUTTONUP: lambda e: e.button,
+                MOUSEBUTTONDOWN: lambda e: e.button,
+            }.get(event.type)(event)
+
+            if event_code is None:
                 continue
 
-            for event in event_key:
+            for event in event_type.get(event_code, ()):
                 node: Node = event.target
                 node._input_event(event)
 
@@ -427,9 +445,110 @@ class Input:
         return cls._instance
 
 
+class Tween():
+    '''Helper class used to tween animations in the `SceneTree`.'''
+
+    class EaseInOut():
+        '''Data class with the EaseInOut methods.'''
+        SINE: Callable = tween.easeInOutSine
+        BOUNCE: Callable = tween.easeInOutBounce
+        CIRC: Callable = tween.easeInOutCirc
+        CUBIC: Callable = tween.easeInOutCubic
+        EXPO: Callable = tween.easeInOutExpo
+        QUAD: Callable = tween.easeInOutQuad
+        QUART: Callable = tween.easeInOutQuart
+        QUINT: Callable = tween.easeInOutQuint
+
+    class EaseIn():
+        '''Data class with the EaseIn methods.'''
+        SINE: Callable = tween.easeInSine
+        BOUNCE: Callable = tween.easeInBounce
+        CIRC: Callable = tween.easeInCirc
+        CUBIC: Callable = tween.easeInCubic
+        EXPO: Callable = tween.easeInExpo
+        QUAD: Callable = tween.easeInQuad
+        QUART: Callable = tween.easeInQuart
+        QUINT: Callable = tween.easeInQuint
+
+    class EaseOut():
+        '''Data class with the EaseOut methods.'''
+        SINE: Callable = tween.easeOutSine
+        BOUNCE: Callable = tween.easeOutBounce
+        CIRC: Callable = tween.easeOutCirc
+        CUBIC: Callable = tween.easeOutCubic
+        EXPO: Callable = tween.easeOutExpo
+        QUAD: Callable = tween.easeOutQuad
+        QUART: Callable = tween.easeOutQuart
+        QUINT: Callable = tween.easeOutQuint
+
+    tween_finished: Entity.Signal
+
+    target: Node
+    name: str = ''
+    ease_method: Callable = None
+
+    from_value = None
+    to_value = None
+    _values_diff = None
+
+    duration: float = 0.0
+    _elapsed_time: float = 0.0
+
+    def _process(self, delta: float) -> None:
+        '''Process the easing method.'''
+        global root
+
+        self._elapsed_time += delta / root.fixed_fps
+
+        if self._elapsed_time > self.duration:
+            setattr(self.target, self.name, self.to_value)
+            root._active_tweens.remove(self)
+            self.tween_finished.emit()
+            return
+
+        time_factor: float = self._elapsed_time / self.duration
+        plot: float = self.ease_method(time_factor)
+        new_value = self._values_diff * plot + self.from_value
+        setattr(self.target, self.name, new_value)
+
+    def interpolate_attribute(self, name: str, from_value, to_value, duration: float,
+                              ease_method: Callable = EaseInOut.SINE) -> None:
+        '''Starts the interpolation of an attribute of `target`.
+
+            Parameters:
+                name (str): The name of the target's attribute.
+                from_value: Value in the t0 (zero time);
+                    - value's type must accept arithmetic operations.
+                to_value: Value in the tn (final time).
+                duration (float): How much the ease animation will last.
+                ease_method (Callable): Must be a valid ease function stored as constants
+                    in the `EaseIn` `EaseOut` and `EaseInOut` data classes.
+        '''
+        global root
+
+        self.name = name
+        self.from_value = from_value
+        self.to_value = to_value
+        self._values_diff = to_value - from_value
+
+        self.duration = duration
+        self.ease_method = ease_method
+        self._process(self._elapsed_time)
+        root._active_tweens.append(self)
+
+    # TODO -> `interpolate_method()`
+    # def interpolate_method(self, name: str, from_args: tuple = (), to_args: tuple = (),
+    #                        args_ease: tuple[Callable] = (), from_kwargs: dict[str,] = {},
+    #                        to_kwargs: dict[str,] = {}, kwargs_ease: dict[str, Callable])
+
+    def __init__(self, target: Node) -> None:
+        self.target = target
+        self.tween_finished = Entity.Signal(self, 'tween_finished')
+
+
 class Control(Node):
     '''Nó Base para subtipos de Interface Gráfica do Usuário (GUI).'''
-    size: tuple[int, int]
+    size: tuple[int, int] = 0, 0
 
     def get_cell(self) -> tuple[int, int]:
         return self.size
@@ -495,6 +614,95 @@ class Grid(Control):
         self._rows: int = rows
 
     rows: property = property(get_rows, set_rows)
+
+
+class HBox(Control):
+    '''Contêiner que posiciona seus nós filhos lado-a-lada em um layout horizontal.'''
+    DEFAULT_PADDING: tuple[int, int, int, int] = 4, 4, 4, 4
+    padding: tuple[int, int, int, int]
+    _rect_offset: tuple[int, int] = 0, 0
+
+    def add_child(self, node: Node, at: int = -1) -> None:
+        super().add_child(node, at=at)
+        new_offset: array = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
+            self.padding[W], self.padding[H])) * self.anchor
+
+        self._rect_offset = self._rect_offset[X] + new_offset[X], max(
+            self._rect_offset[Y], new_offset[Y])
+        self.update_container()
+
+    def remove_child(self, node: Node = None, at: int = -1) -> Node:
+        node: Node = super().remove_child(node=node, at=at)
+
+        if self._children_index:
+            for child in self._children_index:
+                self._rect_offset = max(self._rect_offset, (
+                    child.get_cell()[X] + self.padding[X] + self.padding[W]) * self.anchor[X])
+        else:
+            self._rect_offset = 0
+
+        self.update_container()
+
+        return node
+
+    def update_container(self) -> None:
+        current_offset: int = 0
+
+        for child in self._children_index:
+            current_offset += self.padding[X]
+            child.position = (
+                current_offset, self.padding[Y]) - array(self._rect_offset)
+            current_offset += child.get_cell()[X] + self.padding[W]
+
+        self.size = self._rect_offset
+
+    def __init__(self, name: str = 'HBox', coords: tuple[int, int] = VECTOR_ZERO,
+                 padding: tuple[int, int, int, int] = DEFAULT_PADDING) -> None:
+        super().__init__(name=name, coords=coords)
+        self.padding = padding
+
+
+class VBox(Control):
+    '''Contêiner que posiciona seus nós filhos lado-a-lada em um layout vertical.'''
+    DEFAULT_PADDING: tuple[int, int, int, int] = HBox.DEFAULT_PADDING
+    padding: tuple[int, int, int, int]
+
+    def add_child(self, node: Node, at: int = -1) -> None:
+        super().add_child(node, at=at)
+        new_offset: array = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
+            self.padding[W], self.padding[H])) * self.anchor
+
+        self.size = max(
+            self.size[X], new_offset[X]), self.size[Y] + new_offset[Y]
+        self.update_container()
+
+    def remove_child(self, node: Node = None, at: int = -1) -> Node:
+        node: Node = super().remove_child(node=node, at=at)
+
+        if self._children_index:
+            for child in self._children_index:
+                self.size = max(self.size, (
+                    child.get_cell()[Y] + self.padding[Y] + self.padding[H]) * self.anchor[Y])
+        else:
+            self.size = 0
+
+        self.update_container()
+
+        return node
+
+    def update_container(self) -> None:
+        current_offset: int = 0
+
+        for child in self._children_index:
+            current_offset += self.padding[Y]
+            child.position = (
+                self.padding[X], current_offset) - array(self.size)
+            current_offset += child.get_cell()[Y] + self.padding[H]
+
+    def __init__(self, name: str = 'VBox', coords: tuple[int, int] = VECTOR_ZERO,
+                 padding: tuple[int, int, int, int] = DEFAULT_PADDING) -> None:
+        super().__init__(name=name, coords=coords)
+        self.padding = padding
 
 
 class TextureSequence:
@@ -788,6 +996,11 @@ class Sprite(Node):
     def get_cell(self) -> array:
         return array(self.atlas.base_size)
 
+    # TODO -> Implementar o método draw corretamente agora
+    def __draw__(self) -> None:
+
+        pass
+
     def __init__(self, name: str = 'Sprite', coords: tuple[int, int] = VECTOR_ZERO,
                  atlas: BaseAtlas = None) -> None:
         global root
@@ -808,7 +1021,7 @@ class ParallaxBackground(Node):
     offset: array
     distance: float = 1.0
 
-    def _process(self):
+    def _process(self, delta: float) -> None:
         self.offset[0] = self.offset[0] + self.distance
 
     def _subpropagate(self, target_pos: array, target_scale: array, rect: pygame.Rect, children_data: list[dict]):
@@ -824,7 +1037,6 @@ class Shape(Node):
     '''Nó que representa uma forma usada em cálculos de colisão.
     Deve ser adicionada como filha de um `KinematicBody`.'''
     rect_changed: Entity.Signal
-    base_size: array([int, int])
 
     class CollisionType(IntEnum):
         PHYSICS = 1  # Área usada para detecção de colisão entre corpos
@@ -835,11 +1047,11 @@ class Shape(Node):
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
               offset: tuple[int, int]) -> None:
         super()._draw(target_pos, target_scale, offset)
-        self._rect.size = self.base_size * target_scale
+        self._rect.size = self._base_size * target_scale
         self._rect.topleft = array(target_pos) - offset
 
     def get_cell(self) -> array:
-        return array(self.base_size)
+        return array(self._base_size)
 
     def set_rect(self, value: Rect) -> None:
         self.base_size = array(value.size)
@@ -849,17 +1061,27 @@ class Shape(Node):
     def get_rect(self) -> Rect:
         return self._rect
 
+    def set_base_size(self, value: array) -> None:
+        self._base_size = value
+        self._rect.size = self._base_size * self.scale
+        self.rect_changed.emit(self)
+
+    def get_base_size(self) -> array:
+        return self._base_size
+
     def bounds(self) -> Rect:
         '''Retorna a caixa delimitadora da forma.'''
         return self._rect
 
     def __init__(self, name: str = 'Shape', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-        self._rect: Rect = None
+        self._rect: Rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
+        self._base_size = array(VECTOR_ZERO)
         self.rect_changed = Entity.Signal(self, 'rect_changed')
         self._debug_fill_bounds = True
 
     rect: property = property(get_rect, set_rect)
+    base_size: property = property(get_base_size, set_base_size)
 
 
 class VisibilityNotifier(Shape):
@@ -902,47 +1124,46 @@ class VisibilityNotifier(Shape):
         self._shift: Callable = self.set_on_screen
 
 
-class ProgressBar(Control):
-    bar: Shape
-    bg: Shape
+class Panel(Control):
+    '''Base Control Node for GUI panels.'''
+    DEFAULT_BORDERS: tuple[int, int, int, int] = 2, 2, 2, 2
+
     borders: Shape
+    bg: Shape
 
-    def set_progress(self, value: float) -> None:
-        self._progress = value
-        self._update_progress(value)
+    def set_size(self, value: array) -> None:
+        value = array(value)
+        self._size = value
+        self.borders.base_size = value
 
-    def update_progress(self, value: float) -> None:
-        '''Atualiza o tamanho da barra de progresso de forma ascendente.'''
-        self.bar.base_size[self._grow_coord] = self._base_size[self._grow_coord] * value
+        self._inner_size = value - \
+            (array((self._borders[X], self._borders[Y])
+                   ) + (self._borders[W], self._borders[H]))
+        self.bg.base_size = self._inner_size
 
-    def update_progress_flip(self, value: float) -> None:
-        '''Atualiza o tamanho da barra de progresso de forma descendente.'''
-        base_size: int = self._base_size[self._grow_coord]
-        length: int = base_size * value
+    def get_size(self) -> array:
+        return self._size
 
-        self.bar.position[self._grow_coord] = base_size - length
-        self.bar.base_size[self._grow_coord] = self._base_size[self._grow_coord] * value
+    def set_anchor(self, value: tuple[int, int]) -> None:
+        self.anchor = value
+        self.bg.anchor = value
+        self.borders.anchor = value
+        self.bg.position = array(
+            (self._borders[X], self._borders[Y])) * self.bg.anchor
+        # self.set_size(self._size) # Updates
 
-    def get_progress(self) -> float:
-        return self._progress
-
-    def __init__(self, name: str = 'ProgressBar', coords: tuple[int, int] = VECTOR_ZERO,
-                 bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
-                 borders_color: Color = colors.RED, v_grow: bool = False, flip: bool = False,
-                 size: tuple[int, int] = (125, 25),
-                 borders: tuple[int, int, int, int] = (2, 2, 2, 2)) -> None:
+    def __init__(self, name: str = 'Panel', coords: tuple[int, int] = VECTOR_ZERO,
+                 bg_color: Color = colors.WHITE, borders_color: Color = colors.GRAY,
+                 size: tuple[int, int] = (150, 75),
+                 borders: tuple[int, int, int, int] = DEFAULT_BORDERS) -> None:
         super().__init__(name=name, coords=coords)
-        self.color = bg_color
-        self.size = size
+        self._size = size
+        self._borders: tuple[int, int, int, int] = borders
 
-        self._progress: float = .5
-        self._grow_coord: int = int(v_grow)
-        self._update_progress: Callable = self.update_progress if (
-            flip ^ (not v_grow)) else self.update_progress_flip
-
+        # Determina o tamanho do retângulo interno (BackGround)
         topleft: array = array((borders[X], borders[Y]))
         base_size: array = size - (topleft + (borders[W], borders[H]))
-        self._base_size: array = base_size
+        self._inner_size: array = base_size
 
         # Set the border square
         bar: Shape = Shape(name='Borders')
@@ -953,7 +1174,7 @@ class ProgressBar(Control):
         self.borders = bar
         self.add_child(bar)
 
-        # Set the BG
+        # Set the BackGround
         bar: Shape = Shape(name='BG', coords=topleft)
         bar.anchor = array(TOP_LEFT)
         bar.color = bg_color
@@ -962,11 +1183,52 @@ class ProgressBar(Control):
         self.bg = bar
         self.add_child(bar)
 
+    size: property = property(get_size, set_size)
+
+
+class ProgressBar(Panel):
+    bar: Shape
+
+    def set_progress(self, value: float) -> None:
+        self._progress = value
+        self._update_progress(value)
+
+    def update_progress(self, value: float) -> None:
+        '''Atualiza o tamanho da barra de progresso de forma ascendente.'''
+        self.bar.base_size[self._grow_coord] = self._inner_size[self._grow_coord] * value
+
+    def update_progress_flip(self, value: float) -> None:
+        '''Atualiza o tamanho da barra de progresso de forma descendente.'''
+        base_size: int = self._inner_size[self._grow_coord]
+        length: int = base_size * value
+
+        self.bar.position[self._grow_coord] = base_size - length
+        self.bar.base_size[self._grow_coord] = self._inner_size[self._grow_coord] * value
+
+    def get_progress(self) -> float:
+        return self._progress
+
+    def __init__(self, name: str = 'ProgressBar', coords: tuple[int, int] = VECTOR_ZERO,
+                 bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
+                 borders_color: Color = colors.RED, size: tuple[int, int] = (125, 25),
+                 borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS,
+                 v_grow: bool = False, flip: bool = False) -> None:
+        super().__init__(name=name, coords=coords, bg_color=bg_color,
+                         borders_color=borders_color, size=size, borders=borders)
+        self.color = bg_color
+        self.size = size
+
+        self._progress: float = .5
+        self._grow_coord: int = int(v_grow)
+        self._update_progress: Callable = self.update_progress if (
+            flip ^ (not v_grow)) else self.update_progress_flip
+
         # Set the Inner Bar
+        topleft: tuple[int, int] = borders[X], borders[Y]
         bar: Shape = Shape(name='Bar', coords=topleft)
         bar.anchor = array(TOP_LEFT)
         bar.color = bar_color
-        bar.rect = Rect(topleft, base_size)
+        bar.rect = Rect(topleft, self._inner_size)
         bar._draw_cell = True
         self.bar = bar
         self.add_child(bar)
@@ -1003,10 +1265,10 @@ class KinematicBody(Node):
             warnings.warn(
                 "A `Shape` node must be added as a child to process collisions.", category=Warning)
 
-    def _process(self) -> None:
-        self._physics_process()
+    def _process(self, delta: float) -> None:
+        self._physics_process(delta)
 
-    def _physics_process(self) -> None:
+    def _physics_process(self, delta: float) -> None:
         pass
 
     def _on_Shape_rect_changed(self, _shape: Shape) -> None:
@@ -1066,6 +1328,103 @@ class KinematicBody(Node):
         self._cached_bounds: Rect = None
 
 
+class Popup(Panel):
+    popup_finished: Node.Signal
+    hided: Node.Signal
+    pop_duration: float
+
+    def add_child(self, node: Node, at: int = -1) -> None:
+
+        if node.name == 'Borders' or node.name == 'BG':
+            super().add_child(node, at=at)
+            return
+
+        if node == self or node._parent:
+            raise Node.InvalidChild
+
+        if self._children_refs.get(node.name, False):
+            raise Node.DuplicatedChild
+
+        if at == -1:
+            self._hidden_children.append(node)
+        else:
+            self._hidden_children.insert(at, node)
+
+    def remove_child(self, node: Node = None, at: int = -1) -> Node:
+        node: Node = super().remove_child(node=node, at=at)
+
+        if node in self._hidden_children:
+            self._hidden_children.remove(node)
+
+        return node
+
+    def popup(self, do_ease: bool = None) -> None:
+
+        if do_ease is None:
+            do_ease = self._do_ease
+
+        if do_ease:
+            tween: Tween = Tween(self)
+            tween.tween_finished.connect(tween, self, self._on_Popup)
+            tween.interpolate_attribute(
+                'size', self._size, self._base_size, self.pop_duration)
+        else:
+            self._on_Popup()
+
+    def hide(self, do_ease: bool = None) -> None:
+        '''Esconde o conteúdo do popup da tela'''
+
+        if do_ease is None:
+            do_ease = self._do_ease
+
+        while self._children_index[-1].name != 'BG':
+            self._hidden_children.append(
+                self.remove_child(self._children_index[-1]))
+
+        if do_ease:
+            tween: Tween = Tween(self)
+            tween.tween_finished.connect(tween, self, self._on_Hide)
+            tween.interpolate_attribute(
+                'size', self._size, array(VECTOR_ZERO), self.pop_duration)
+        else:
+            self._on_Hide()
+
+    def _on_Popup(self) -> None:
+        '''Apresenta o conteúdo do popup na tela.'''
+        child: Node
+
+        while self._hidden_children:
+            child = self._hidden_children.pop()
+            super().add_child(child)
+
+        self.popup_finished.emit()
+
+    def _on_Hide(self) -> None:
+        self.hided.emit()
+
+    def __init__(self, name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
+                 do_ease: bool = True, pop_duration: float = .3, bg_color: Color = colors.WHITE,
+                 borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
+                 borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS) -> None:
+        self._hidden_children: list[Node] = []
+        super().__init__(name=name, coords=coords, bg_color=bg_color,
+                         borders_color=borders_color, size=size, borders=borders)
+        self._do_ease = do_ease
+        self._base_size: tuple[int, int] = size
+        self.pop_duration = pop_duration
+        self.popup_finished = Node.Signal(self, 'popup_finished')
+        self.hided = Node.Signal(self, 'hided')
+
+        if do_ease:
+            self.size = array(VECTOR_ZERO)
+            # self.bg.rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
+            # self.borders.rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
+            # self._size = array(VECTOR_ZERO)
+        # else:
+            # self.bg.rect = Rect(VECTOR_ZERO, size)
+            # self._size = array(size)
+
+
 # TODO -> Tornar a Label um Nó Control
 class Label(Node):
     '''Nó usado para apresentar texto na tela.'''
@@ -1096,7 +1455,7 @@ class Label(Node):
             (self._surface(), target_pos - offset))
 
     def get_cell(self) -> tuple[int, int]:
-        return self._surface().get_size()
+        return self.font.size(self.text)
 
     def __init__(self, font: font.Font, name: str = 'Label', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = colors.WHITE, text: str = '') -> None:
@@ -1111,6 +1470,149 @@ class Label(Node):
         self.set_text(text)
 
     text: property = property(get_text, set_text)
+
+
+class RichTextLabel(Control):
+    default_font: font.Font
+    fonts: dict[str, font.Font]
+
+    _labels: list[Label]
+    _text: str = ''
+
+    def set_rich_text(self, *text: str) -> None:
+        txt: str = ''.join(text)
+        matches: Iterator = re.finditer('[\n]', txt)  # Search for newlines
+        metadata: dict[str, ] = {
+            'newlines': deque(),
+        }
+
+        for match in matches:
+            metadata['newlines'].append(match.span())
+
+        line_id: int = 0
+        parser_index: int = 0
+        current_offset: int = 0
+        current_color: Color = self.color
+        current_font: font.Font = self.default_font
+
+        label: Label = Label(current_font, name='Label0', color=current_color)
+        area: Rect = Rect(VECTOR_ZERO, label.get_cell())
+        self._labels.append(label)
+        self.add_child(label)
+
+        # FIXME -> Remover a linha sobrando
+        def _make_line(i: int, to_pos: int) -> None:
+            nonlocal self, label, metadata, txt, parser_index, current_offset, current_color, area
+            label.text = txt[parser_index: to_pos]
+            current_offset += label.get_cell()[Y]
+            area = area.union(Rect((0, current_offset), label.get_cell()))
+
+            parser_index = to_pos
+            label = Label(current_font, name=f'Label{i}', coords=(
+                0, current_offset), color=current_color)
+            self._labels.append(label)
+            self.add_child(label)
+
+        while metadata['newlines']:
+            line_id += 1
+            _make_line(line_id, metadata['newlines'].popleft()[0])
+            parser_index += 1
+
+        if txt[parser_index:-1]:
+            line_id += 1
+            _make_line(line_id, -1)
+
+        for label in self._labels:
+            label.position = array(label.position) - \
+                array(area.size, dtype=int) * self.anchor
+
+    def get_rich_text(self) -> str:
+        return self._text
+
+    def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
+                 name: str = 'RichTextLabel', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = colors.WHITE) -> None:
+        super().__init__(name=name, coords=coords)
+        self._labels = []
+        self.default_font = default_font
+        self.color = color
+
+
+class Button(Panel):
+    CLICK_EVENT: str = 'click'
+
+    normal_color: Color = colors.WHITE
+    highlight_color: Color = colors.CYAN
+    focus_color: Color = colors.BLUE
+    pressed_color: Color = colors.GREEN
+
+    pressed: Node.Signal
+    label: Label
+    _is_on_focus: bool = False
+
+    def _process(self, delta: float) -> None:
+        self._mouse_input()
+
+    def _unfocused_mouse_input(self) -> None:
+
+        if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
+            self.bg.color = self.highlight_color
+        else:
+            self.bg.color = self.normal_color
+
+    def _focused_mouse_input(self) -> None:
+
+        if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
+            self.bg.color = self.highlight_color.lerp(self.focus_color, .5)
+        else:
+            self.bg.color = self.focus_color
+
+    def _input_event(self, event: InputEvent) -> None:
+
+        if event.tag is Button.CLICK_EVENT:
+
+            if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
+                self.color = self.pressed_color
+                self.pressed.emit()
+                print('clicked')
+
+    def set_anchor(self, value: tuple[int, int]) -> None:
+        super().set_anchor(value)
+        self.label.anchor = value
+
+    def set_is_on_focus(self, value: bool) -> None:
+        self._is_on_focus = value
+        self._mouse_input = self._focused_mouse_input if value else self._unfocused_mouse_input
+
+    def get_is_on_focus(self) -> bool:
+        return self._is_on_focus
+
+    def __init__(self, font: font.Font, name: str = 'Button', coords: tuple[int, int] = VECTOR_ZERO,
+                 bg_color: Color = colors.WHITE, borders_color: Color = colors.GRAY,
+                 size: tuple[int, int] = None, padding: tuple[int, int] = (20, 5), text: str = '',
+                 borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS) -> None:
+        '''
+        If `size` is not passed, the button `size` will be calculated
+        based on the `padding`, the `text` and the `font`.
+        '''
+        if size == None:
+            size = array(font.size(text)) + padding
+
+        super().__init__(name=name, coords=coords, bg_color=bg_color,
+                         borders_color=borders_color, size=size, borders=borders)
+        self._mouse_input: Callable = self._unfocused_mouse_input
+        self.pressed = Node.Signal(self, 'pressed')
+
+        label: Label = Label(font, coords=(
+            borders[X], borders[Y]), color=colors.BLACK, text=text)
+        self.label = label
+        self.add_child(label)
+
+        # Registra os eventos de entrada do mouse
+        input.register_event(self, MOUSEBUTTONUP,
+                             Input.Mouse.LEFT_CLICK, Button.CLICK_EVENT)
+
+    is_on_focus: property = property(get_is_on_focus, set_is_on_focus)
 
 
 class PhysicsHelper():
@@ -1256,6 +1758,7 @@ class SceneTree(Node):
     '''Nó singleton usado como a rais da árvore da cena.
     Definido dessa forma para facilitar acessos globais.'''
     pause_toggled: Node.Signal
+    locale_changed: Node.Signal
 
     # Default Screen - Onde os nós da árvore irão desenhar sobre.
     # Atualmente os valores não são sincronizados individualmente, ao invés disso,
@@ -1280,11 +1783,17 @@ class SceneTree(Node):
     clock: pygame.time.Clock = None
     fixed_fps: int = 60  # Frames Per Second
 
+    # Tweening
+    _active_tweens: list[Tween] = []
+
     _instance = None
     tree_pause: int = 0
     groups: dict[str, list[Node]] = {}
 
+    _locale: str = 'en'
+    _locales: dict[str, ]
     _current_scene: Node = None
+    _last_time: float = 0.0
 
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
@@ -1309,14 +1818,24 @@ class SceneTree(Node):
             return
 
         while True:
+            # tick = self.clock.tick(self.fixed_fps)
             self.clock.tick(self.fixed_fps)
+            delta: float = self.clock.get_fps() / self.fixed_fps
+            # print(self.clock.get_fps() / self.fixed_fps)
+            # print(tick / self.fixed_fps)
+            # print(tick / max(0.0001, self.clock.get_fps()))
+
             self.screen.fill(self.screen_color)
             # Preenche a tela
 
             input._tick()
             # Propaga as entradas
 
-            self._propagate()
+            # Processa os tweens ativos na lista
+            for tween in self._active_tweens:
+                tween._process(delta)
+
+            self._propagate(delta)
             # Propaga o processamento
 
             for id, sprites in self.sprites_groups.items():
@@ -1326,7 +1845,7 @@ class SceneTree(Node):
 
             while self.render_queue:
                 # Desenha a GUI
-                self.screen.blit(*self.render_queue.pop())
+                self.screen.blit(*self.render_queue.popleft())
 
             pygame.display.update()
 
@@ -1373,6 +1892,34 @@ class SceneTree(Node):
         '''Verifica se o nó pertence a um grupo determinado.'''
         return group in node._current_groups
 
+    def get_fps(self) -> float:
+        return self.clock.get_fps()
+
+    def set_load_method(self, method: Callable[[str, str], dict[str, ]], dir: str) -> None:
+        self._locale_load_method = method
+        self._locales_dir = dir
+
+    def set_locale(self, to: str) -> None:
+        self._locale = to
+
+        if to in self._cached_locales:
+            self._locales = self._cached_locales[to]
+        else:
+            if self._locale:
+                self._cached_locales[self._locale] = self._locales
+                self.locale_changed.emit(to)
+
+            self._locales = self._locale_load_method(self._locales_dir, to)
+
+    def tr(self, key: str) -> None:
+        '''Retorna uma string de acordo com a locale (tradução) carregada no momento'''
+        return self._locales[key]
+
+    def clear_cached_locales(self) -> None:
+        '''Remove as locales que não estão sendo usadas da memória.'''
+        del self._cached_locales
+        self._cached_locales = {}
+
     def set_screen_size(self, value: tuple[int, int]) -> None:
         self._screen_width, self._screen_height = value
         self._screen_rect.topleft = value
@@ -1405,9 +1952,14 @@ class SceneTree(Node):
     def __init__(self, name: str = 'root', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
         self._is_on_tree = True
+        self._locales = {}
+        self._locales_dir: str = ''
+        self._cached_locales: dict[str, dict[str, ]] = {}
+        self._locale_load_method: Callable[[str, str], dict[str, ]] = None
 
         # Events
         self.pause_toggled = Node.Signal(self, 'pause_toggled')
+        self.locale_changed = Node.Signal(self, 'locale_changed')
 
     screen_size: property = property(get_screen_size, set_screen_size)
     current_scene: property = property(get_current_scene, set_current_scene)
