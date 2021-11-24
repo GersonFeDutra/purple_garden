@@ -4,10 +4,11 @@ from .game_world import GameWorld
 
 
 class TitleScreen(Node):
-    START_GAME_EVENT: str = 'start_game'
-    KEY_UP_EVENT: str = 'key_up'
-    KEY_DOWN_EVENT: str = 'key_down'
-    ESCAPE_EVENT: str = 'escape'
+
+    class Events():
+        KEY_UP_EVENT: str = 'key_up'
+        KEY_DOWN_EVENT: str = 'key_down'
+        ESCAPE_EVENT: str = 'escape'
 
     spritesheet_old: Surface
     spritesheet: Surface
@@ -19,10 +20,11 @@ class TitleScreen(Node):
     selected_button: int
     buttons: list[Button]
     start_button: Button
+    lang_button: Button
     exit_button: Button
     info_button: Button
     credits_button: Button
-    
+
     info: list[str]
     info_label: Label
 
@@ -35,27 +37,13 @@ class TitleScreen(Node):
 
         if self.on_focus:
 
-            if event.tag is TitleScreen.START_GAME_EVENT:
-                if self.buttons[self.selected_button] is self.start_button:
-                    self.change_scene()
-                elif self.buttons[self.selected_button] is self.info_button:
-                    self._on_Info_pressed()
-                elif self.buttons[self.selected_button] is self.credits_button:
-                    self._on_Credits_pressed()
-                elif self.buttons[self.selected_button] is self.exit_button:
-                    self._on_Exit_pressed()
-
-                self.on_focus = False
-
-            if event.tag is TitleScreen.KEY_DOWN_EVENT:
-                self.buttons[self.selected_button].is_on_focus = False
+            if event.tag is TitleScreen.Events.KEY_DOWN_EVENT:
                 self.selected_button = (
                     self.selected_button + 1) % len(self.buttons)
                 self.info_label.text = self.info[self.selected_button]
                 self.buttons[self.selected_button].is_on_focus = True
 
-            if event.tag is TitleScreen.KEY_UP_EVENT:
-                self.buttons[self.selected_button].is_on_focus = False
+            if event.tag is TitleScreen.Events.KEY_UP_EVENT:
                 self.selected_button = (
                     self.selected_button - 1) % len(self.buttons)
                 self.info_label.text = self.info[self.selected_button]
@@ -63,7 +51,7 @@ class TitleScreen(Node):
 
         else:
 
-            if event.tag is TitleScreen.ESCAPE_EVENT:
+            if event.tag is TitleScreen.Events.ESCAPE_EVENT:
                 if self.current_focus is None:
                     self.on_focus = True
                     return
@@ -80,12 +68,10 @@ class TitleScreen(Node):
             self.spritesheet_old, self.spritesheet,
             self.spritesheet_data, self.sound_fxs, self.default_font, self.gui_font)
 
-    # def _on_Languages_pressed(self) -> None:
-    #     # TODO
-    #     pass
-
     def _on_Language_pressed(self) -> None:
-        pass
+        LOCALES: tuple[str] = 'pt', 'en'
+        root.set_locale(
+            LOCALES[(LOCALES.index(root._locale) + 1) % len(LOCALES)])
 
     def _on_Info_pressed(self) -> None:
 
@@ -122,6 +108,19 @@ class TitleScreen(Node):
 
     def _on_Locale_changed(self, to: str) -> None:
         self.info = root.tr('INFOS')
+        self.start_button.label.set_text(root.tr('START'))
+        self.lang_button.label.set_text(root.tr('LANGUAGE'))
+        self.info_button.label.set_text(root.tr('INFO'))
+        self.credits_button.label.set_text(root.tr('CREDITS'))
+        self.exit_button.label.set_text(root.tr('EXIT'))
+        self.info_label.set_text(root.tr('INFOS')[self.selected_button])
+        self.on_focus = True
+
+    def _on_Button_focus_changed(self, button_id: int, value: bool) -> None:
+
+        if value:
+            self.selected_button = button_id
+            self.info_label.text = self.info[button_id]
 
     def __init__(self, spritesheet_old: Surface, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
@@ -136,12 +135,12 @@ class TitleScreen(Node):
         self.gui_font = gui_font
         self.buttons = []
         self.info = root.tr('INFOS')
-        
+
         root.screen_color = Color('#6E34B7')
 
         Y_OFFSET: tuple = (0, 55)
         title: Label = Label(title_font, name='Title', coords=(array(
-            root.screen_size) // 2) - array(Y_OFFSET) * 2, color=colors.WHITE, text='Purple Garden')
+            root.screen_size) // 2) - array(Y_OFFSET) * 3, color=colors.WHITE, text='Purple Garden')
         title.anchor = array(CENTER)
         copyright_label: Label = Label(gui_font, name='Copyright', coords=(
             root._screen_width // 2, root._screen_height - Y_OFFSET[Y]), color=colors.GRAY,
@@ -153,102 +152,96 @@ class TitleScreen(Node):
         self.info_label = info_label
 
         start_button: Button = Button(
-            default_font, name='StartButton',
-            coords=title.position + array(Y_OFFSET) * 2, text=root.tr('START'))
-        start_button.set_anchor(CENTER)
+            default_font, name='StartButton', coords=title.position +
+            array(Y_OFFSET) * 2, anchor=CENTER, text=root.tr('START'))
         start_button.is_on_focus = True
-        self.buttons.append(start_button)
         self.start_button = start_button
         self.selected_button = 0
         start_button.connect(start_button.pressed, self, self.change_scene)
+        start_button.connect(
+            start_button.focus_changed, self,
+            self._on_Button_focus_changed, 0)
+        self.buttons.append(start_button)
+
         # h_box.add_child(start_button)
 
         # WATCH
         lang_button: Button = Button(
             default_font, name='LangButton',
-            coords=start_button.position + Y_OFFSET, text=root.tr('LANGUAGE'))
-        lang_button.set_anchor(CENTER)
+            coords=start_button.position + Y_OFFSET,
+            anchor=CENTER, text=root.tr('LANGUAGE'))
         lang_button.connect(
             lang_button.pressed, self, self._on_Language_pressed)
+        lang_button.connect(lang_button.focus_changed, self,
+                            self._on_Button_focus_changed, 1)
+        self.buttons.append(lang_button)
+        self.lang_button = lang_button
 
         info_button: Button = Button(
-            default_font, name='InfoButton',
-            coords=start_button.position + Y_OFFSET, text=root.tr('INFO'))
-        info_button.set_anchor(CENTER)
+            default_font, name='InfoButton', coords=lang_button.position + Y_OFFSET,
+            anchor=CENTER, text=root.tr('INFO'))
         info_button.connect(info_button.pressed, self, self._on_Info_pressed)
+        info_button.connect(
+            info_button.focus_changed, self,
+            self._on_Button_focus_changed, 2)
         self.buttons.append(info_button)
         self.info_button = info_button
 
         credits_button: Button = Button(
             default_font, name='Credits',
-            coords=info_button.position + Y_OFFSET, text=root.tr('CREDITS'))
-        credits_button.set_anchor(CENTER)
+            coords=info_button.position + Y_OFFSET,
+            anchor=CENTER, text=root.tr('CREDITS'))
         credits_button.connect(
             credits_button.pressed, self, self._on_Credits_pressed)
-        self.buttons.append(credits_button)
         self.credits_button = credits_button
+        credits_button.connect(credits_button.focus_changed,
+                               self, self._on_Button_focus_changed, 3)
+        self.buttons.append(credits_button)
 
         exit_button: Button = Button(
             default_font, name='Exit',
-            coords=credits_button.position + Y_OFFSET, text=root.tr('EXIT'))
-        exit_button.set_anchor(CENTER)
+            coords=credits_button.position + Y_OFFSET,
+            anchor=CENTER, text=root.tr('EXIT'))
         exit_button.connect(
             exit_button.pressed, self, self._on_Exit_pressed)
-        self.buttons.append(exit_button)
         self.exit_button = exit_button
+        exit_button.connect(exit_button.focus_changed, self,
+                            self._on_Button_focus_changed, 4)
+        self.buttons.append(exit_button)
 
-        credits_popup: Popup = Popup(name='CreditsPopup', coords=array(
-            root.screen_size) // 2, size=array(root.screen_size) // 3)
-        credits_popup.anchor = array(CENTER)
-        self.credits = credits_popup
-        credits_popup.set_anchor(CENTER)
+        credits_popup: PopupDialog = PopupDialog(gui_font, name='CreditsPopup', coords=array(
+            root.screen_size) // 2, anchor=CENTER, size=array(root.screen_size) // 3)
         credits_popup.connect(credits_popup.hided, self, self._on_Popup_hidden)
+        credits_popup.set_text(*root.tr('CREDITS_TXT'))
+        self.credits = credits_popup
 
-        rt_label: RichTextLabel = RichTextLabel(
-            gui_font, 'CreditsText', color=colors.BLACK)
-        rt_label.anchor = array(CENTER)
-        rt_label.set_rich_text(*root.tr('CREDITS_TXT'))
-        credits_popup.add_child(rt_label)
-
-        info_popup: Popup = Popup(name='InfoPopup', coords=array(
-            root.screen_size) // 2, size=array(root.screen_size) // 2)
+        info_popup: PopupDialog = PopupDialog(gui_font, name='InfoPopup', coords=array(
+            root.screen_size) // 2, anchor=CENTER, size=array(root.screen_size) // 2)
+        info_popup.set_text(*root.tr('INFO_TXT'))
         info_popup.connect(info_popup.hided, self, self._on_Popup_hidden)
-        info_popup.set_anchor(CENTER)
         self.tuto = info_popup
 
-        tuto_label: RichTextLabel = RichTextLabel(
-            gui_font, name='TutorialText', color=colors.BLACK)
-        tuto_label.anchor = array(CENTER)
-        tuto_label.set_rich_text(*root.tr('INFO_TXT'))
-        info_popup.add_child(tuto_label)
-
-        label_tuto: Label = Label(gui_font, text=self.info[self.selected_button])
-        label_tuto.anchor = array(CENTER)
-        info_popup.add_child(label_tuto)
-
-        # Registro dos eventos de entrada
-
-        for key in (K_RETURN, K_SPACE, K_KP_ENTER):
-            input.register_event(self, KEYDOWN, key,
-                                 TitleScreen.START_GAME_EVENT)
-
-        input.register_event(self, KEYDOWN, K_UP, TitleScreen.KEY_UP_EVENT)
-        input.register_event(self, KEYDOWN, K_DOWN, TitleScreen.KEY_DOWN_EVENT)
-        input.register_event(self, KEYDOWN, K_ESCAPE, TitleScreen.ESCAPE_EVENT)
-        input.register_event(self, MOUSEBUTTONUP,
-                             Input.Mouse.RIGHT_CLICK, TitleScreen.ESCAPE_EVENT)
+        input.register_event(
+            self, KEYDOWN, K_UP, TitleScreen.Events.KEY_UP_EVENT)
+        input.register_event(
+            self, KEYDOWN, K_DOWN, TitleScreen.Events.KEY_DOWN_EVENT)
+        input.register_event(
+            self, KEYDOWN, K_ESCAPE, TitleScreen.Events.ESCAPE_EVENT)
+        input.register_event(
+            self, MOUSEBUTTONUP, Input.Mouse.RIGHT_CLICK, TitleScreen.Events.ESCAPE_EVENT)
 
         # Construção da tela
         self.add_child(title)
         self.add_child(info_label)
 
         self.add_child(start_button)
+        self.add_child(lang_button)
         self.add_child(info_button)
         self.add_child(credits_button)
         self.add_child(exit_button)
 
         # self.add_child(h_box)
         self.add_child(copyright_label)
-        
+
         # Sinais
         root.connect(root.locale_changed, self, self._on_Locale_changed)

@@ -1,14 +1,17 @@
-from typing import Callable, Iterator
+from abc import abstractmethod
+from typing import Callable, Iterator, Match
 
 import pygame
 from pygame import Color, Surface, Vector2
 from pygame import sprite, draw, font
+from pygame import color
 from pygame.locals import *
 from sys import exit, argv
 
 # Other imports
 import re
 import warnings
+import webbrowser
 import pytweening as tween
 from enum import IntEnum
 from numpy import array
@@ -46,9 +49,7 @@ class InputEvent:
 class Entity:
     '''Entidade básica do jogo, que contém informações de espaço (2D).'''
     position: array
-    color: Color
     scale: array
-    anchor: array
 
     class SignalNotExists(Exception):
         pass
@@ -123,10 +124,10 @@ class Entity:
 
         # Desenha o Gizmo
         extents: array = GIZMO_RADIUS * target_scale
-        draw.line(root.screen, self.color,
+        draw.line(root.screen, self._color,
                   (target_pos[X] - extents[X], target_pos[Y]),
                   (target_pos[X] + extents[X], target_pos[Y]))
-        draw.line(root.screen, self.color,
+        draw.line(root.screen, self._color,
                   (target_pos[X], target_pos[Y] - extents[Y]),
                   (target_pos[X], target_pos[Y] + extents[Y]))
 
@@ -160,19 +161,28 @@ class Entity:
         except Entity.Signal.NotOwner:
             raise Entity.SignalNotExists
 
-    def get_x(self) -> int:
-        return self.position[X]
+    def set_color(self, value: Color) -> None:
+        self._color = value
 
-    def get_y(self) -> int:
-        return self.position[Y]
+    def get_color(self) -> Color:
+        return self._color
+
+    def set_anchor(self, value: tuple[int, int]) -> None:
+        self._anchor = array(value)
+
+    def get_anchor(self) -> tuple[int, int]:
+        return tuple(self._anchor)
 
     def __init__(self, coords: tuple[int, int] = VECTOR_ZERO) -> None:
         self.position = array(coords)
         self.scale = array(VECTOR_ONE)
-        self.anchor = array(CENTER)
-        self.color = Color(0, 185, 225, 125)
+        self._anchor = array(CENTER)
+        self._color: Color = Color(0, 185, 225, 125)
         self._debug_fill_bounds: bool = False
         self._draw_cell = IS_DEBUG_ENABLED
+
+    color: property = property(get_color, set_color)
+    anchor: property = property(get_anchor, set_anchor)
 
 
 class Node(Entity):
@@ -548,14 +558,23 @@ class Tween():
 
 class Control(Node):
     '''Nó Base para subtipos de Interface Gráfica do Usuário (GUI).'''
-    size: tuple[int, int] = 0, 0
 
     def get_cell(self) -> tuple[int, int]:
         return self.size
 
-    def __init__(self, name: str = 'Control', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def set_size(self, value: tuple[int, int]) -> None:
+        self._size = array(value)
+
+    def get_size(self) -> tuple[int, int]:
+        return tuple(self._size)
+
+    def __init__(self, name: str = 'Control', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT) -> None:
         super().__init__(name=name, coords=coords)
-        self.anchor = array(TOP_LEFT)
+        self.anchor = array(anchor)
+        self._size: array = array(VECTOR_ZERO)
+
+    size: property(get_size, set_size)
 
 
 class Grid(Control):
@@ -609,8 +628,8 @@ class Grid(Control):
         return self._rows
 
     def __init__(self, name: str = 'Grid', coords: tuple[int, int] = VECTOR_ZERO,
-                 rows: int = 1) -> None:
-        super().__init__(name=name, coords=coords)
+                 anchor: tuple[int, int] = TOP_LEFT, rows: int = 1) -> None:
+        super().__init__(name=name, coords=coords, anchor=TOP_LEFT)
         self._rows: int = rows
 
     rows: property = property(get_rows, set_rows)
@@ -657,8 +676,9 @@ class HBox(Control):
         self.size = self._rect_offset
 
     def __init__(self, name: str = 'HBox', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT,
                  padding: tuple[int, int, int, int] = DEFAULT_PADDING) -> None:
-        super().__init__(name=name, coords=coords)
+        super().__init__(name=name, coords=coords, anchor=anchor)
         self.padding = padding
 
 
@@ -700,8 +720,9 @@ class VBox(Control):
             current_offset += child.get_cell()[Y] + self.padding[H]
 
     def __init__(self, name: str = 'VBox', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT,
                  padding: tuple[int, int, int, int] = DEFAULT_PADDING) -> None:
-        super().__init__(name=name, coords=coords)
+        super().__init__(name=name, coords=coords, anchor=anchor)
         self.padding = padding
 
 
@@ -993,13 +1014,12 @@ class Sprite(Node):
             self.atlas.image, (self.atlas.base_size * target_scale).astype('int'))
         self.atlas.rect.topleft = array(target_pos) - offset
 
+        # Draw sprite in order
+        root.screen.blit(self.atlas.image, self.atlas.rect)
+        self.atlas.update()
+
     def get_cell(self) -> array:
         return array(self.atlas.base_size)
-
-    # TODO -> Implementar o método draw corretamente agora
-    def __draw__(self) -> None:
-
-        pass
 
     def __init__(self, name: str = 'Sprite', coords: tuple[int, int] = VECTOR_ZERO,
                  atlas: BaseAtlas = None) -> None:
@@ -1132,8 +1152,8 @@ class Panel(Control):
     bg: Shape
 
     def set_size(self, value: array) -> None:
+        super().set_size(value)
         value = array(value)
-        self._size = value
         self.borders.base_size = value
 
         self._inner_size = value - \
@@ -1145,7 +1165,7 @@ class Panel(Control):
         return self._size
 
     def set_anchor(self, value: tuple[int, int]) -> None:
-        self.anchor = value
+        super().set_anchor(value)
         self.bg.anchor = value
         self.borders.anchor = value
         self.bg.position = array(
@@ -1153,22 +1173,23 @@ class Panel(Control):
         # self.set_size(self._size) # Updates
 
     def __init__(self, name: str = 'Panel', coords: tuple[int, int] = VECTOR_ZERO,
-                 bg_color: Color = colors.WHITE, borders_color: Color = colors.GRAY,
-                 size: tuple[int, int] = (150, 75),
+                 anchor: tuple[int, int] = TOP_LEFT,  bg_color: Color = colors.WHITE,
+                 borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
                  borders: tuple[int, int, int, int] = DEFAULT_BORDERS) -> None:
-        super().__init__(name=name, coords=coords)
-        self._size = size
+        super().__init__(name=name, coords=coords, anchor=anchor)
+        self._size = array(size)
         self._borders: tuple[int, int, int, int] = borders
 
         # Determina o tamanho do retângulo interno (BackGround)
         topleft: array = array((borders[X], borders[Y]))
         base_size: array = size - (topleft + (borders[W], borders[H]))
         self._inner_size: array = base_size
+        # offset: array = array(self.get_cell()) * - self.anchor
 
         # Set the border square
         bar: Shape = Shape(name='Borders')
-        bar.anchor = array(TOP_LEFT)
         bar.color = borders_color
+        bar.anchor = array(TOP_LEFT)
         bar.rect = Rect(VECTOR_ZERO, size)
         bar._draw_cell = True
         self.borders = bar
@@ -1182,6 +1203,8 @@ class Panel(Control):
         bar._draw_cell = True
         self.bg = bar
         self.add_child(bar)
+
+        self.set_anchor(anchor)
 
     size: property = property(get_size, set_size)
 
@@ -1403,11 +1426,12 @@ class Popup(Panel):
         self.hided.emit()
 
     def __init__(self, name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
-                 do_ease: bool = True, pop_duration: float = .3, bg_color: Color = colors.WHITE,
-                 borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
+                 anchor: tuple[int, int] = TOP_LEFT, do_ease: bool = True, pop_duration: float = .3,
+                 bg_color: Color = colors.WHITE, borders_color: Color = colors.GRAY,
+                 size: tuple[int, int] = (150, 75),
                  borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS) -> None:
         self._hidden_children: list[Node] = []
-        super().__init__(name=name, coords=coords, bg_color=bg_color,
+        super().__init__(name=name, coords=coords, anchor=anchor, bg_color=bg_color,
                          borders_color=borders_color, size=size, borders=borders)
         self._do_ease = do_ease
         self._base_size: tuple[int, int] = size
@@ -1451,14 +1475,18 @@ class Label(Node):
         global root
 
         super()._draw(target_pos, target_scale, offset)
-        root.render_queue.append(
-            (self._surface(), target_pos - offset))
+
+        root.screen.blit(self._surface(), target_pos - offset)
 
     def get_cell(self) -> tuple[int, int]:
         return self.font.size(self.text)
 
+    def set_color(self, value: Color) -> None:
+        super().set_color(value)
+        self._surface = self.update_surface
+
     def __init__(self, font: font.Font, name: str = 'Label', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = colors.WHITE, text: str = '') -> None:
+                 color: Color = colors.BLACK, text: str = '') -> None:
         super().__init__(name=name, coords=coords)
         self.font = font
         self.color = color
@@ -1472,147 +1500,516 @@ class Label(Node):
     text: property = property(get_text, set_text)
 
 
-class RichTextLabel(Control):
-    default_font: font.Font
-    fonts: dict[str, font.Font]
+class Text(Control):
+    text_changed: Node.Signal
+    font: font.Font
 
     _labels: list[Label]
     _text: str = ''
 
-    def set_rich_text(self, *text: str) -> None:
+    def set_text(self, *text: str) -> None:
         txt: str = ''.join(text)
-        matches: Iterator = re.finditer('[\n]', txt)  # Search for newlines
-        metadata: dict[str, ] = {
-            'newlines': deque(),
-        }
+        newlines: deque[tuple[int, int]] = deque()
+        self._text = txt
+
+        for label in self._labels:
+            self.remove_child(label)
+        self._labels = []
+
+        # Search for `\n` (newlines)
+        matches: Iterator[Match] = re.finditer('[\n]', txt)
+        match: Match
+        parser_index: int = 0
 
         for match in matches:
-            metadata['newlines'].append(match.span())
+            newlines.append((parser_index, match.start()))
+            parser_index = match.end()
+
+        if len(txt) > parser_index:
+            newlines.append((parser_index, len(txt)))
 
         line_id: int = 0
-        parser_index: int = 0
-        current_offset: int = 0
-        current_color: Color = self.color
-        current_font: font.Font = self.default_font
+        current_offset: tuple[int, int] = VECTOR_ZERO
+        area: Rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
 
-        label: Label = Label(current_font, name='Label0', color=current_color)
-        area: Rect = Rect(VECTOR_ZERO, label.get_cell())
-        self._labels.append(label)
-        self.add_child(label)
+        while newlines:
+            # Make line
+            span: tuple[int, int] = newlines.popleft()
 
-        # FIXME -> Remover a linha sobrando
-        def _make_line(i: int, to_pos: int) -> None:
-            nonlocal self, label, metadata, txt, parser_index, current_offset, current_color, area
-            label.text = txt[parser_index: to_pos]
-            current_offset += label.get_cell()[Y]
-            area = area.union(Rect((0, current_offset), label.get_cell()))
-
-            parser_index = to_pos
-            label = Label(current_font, name=f'Label{i}', coords=(
-                0, current_offset), color=current_color)
+            label: Label = Label(self.font, name=f'Label{line_id}', coords=(
+                0, current_offset[Y]), color=self.color, text=txt[span[0]:span[1]])
+            area = area.union(Rect((0, current_offset[Y]), label.get_cell()))
+            current_offset += array(label.get_cell())
             self._labels.append(label)
             self.add_child(label)
-
-        while metadata['newlines']:
             line_id += 1
-            _make_line(line_id, metadata['newlines'].popleft()[0])
-            parser_index += 1
 
-        if txt[parser_index:-1]:
-            line_id += 1
-            _make_line(line_id, -1)
-
+        # Desloca o texto de acordo com a âncora da caixa de texto
         for label in self._labels:
             label.position = array(label.position) - \
                 array(area.size, dtype=int) * self.anchor
 
-    def get_rich_text(self) -> str:
+        self.size = area.size
+        self.text_changed.emit()
+
+    def get_text(self) -> str:
         return self._text
 
-    def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
-                 name: str = 'RichTextLabel', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = colors.WHITE) -> None:
-        super().__init__(name=name, coords=coords)
+    def set_color(self, value: Color) -> None:
+        super().set_color(value)
+
+        for label in self._labels:
+            label.set_color(value)
+
+    def __init__(self, font: font.Font, name: str = 'Text', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT, color: Color = colors.BLACK) -> None:
+        super().__init__(name=name, coords=coords, anchor=anchor)
+        self.text_changed = Node.Signal(self, 'text_changed')
         self._labels = []
-        self.default_font = default_font
-        self.color = color
+        self.font = font
+        self.set_color(color)
 
 
-class Button(Panel):
-    CLICK_EVENT: str = 'click'
+class BaseButton(Control):
+    HOLD_EVENT: str = 'hold'
+    RELEASE_EVENT: str = 'released'
 
-    normal_color: Color = colors.WHITE
-    highlight_color: Color = colors.CYAN
-    focus_color: Color = colors.BLUE
-    pressed_color: Color = colors.GREEN
-
-    pressed: Node.Signal
-    label: Label
-    _is_on_focus: bool = False
+    focus_changed: Node.Signal
+    is_pressed: bool = False
+    label: Text
+    _rect: Rect
 
     def _process(self, delta: float) -> None:
         self._mouse_input()
 
-    def _unfocused_mouse_input(self) -> None:
-
-        if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
-            self.bg.color = self.highlight_color
-        else:
-            self.bg.color = self.normal_color
-
-    def _focused_mouse_input(self) -> None:
-
-        if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
-            self.bg.color = self.highlight_color.lerp(self.focus_color, .5)
-        else:
-            self.bg.color = self.focus_color
-
     def _input_event(self, event: InputEvent) -> None:
 
-        if event.tag is Button.CLICK_EVENT:
+        def hold() -> None:
+            global root
+            nonlocal self
 
-            if self.borders.rect.collidepoint(pygame.mouse.get_pos()):
-                self.color = self.pressed_color
-                self.pressed.emit()
-                print('clicked')
+            if self._rect.collidepoint(pygame.mouse.get_pos()):
+                self._hold()
+
+        def release() -> None:
+            global root
+            nonlocal self
+
+            if self.is_pressed and self._rect.collidepoint(pygame.mouse.get_pos()):
+                self._release()
+
+        {
+            BaseButton.HOLD_EVENT: hold,
+            BaseButton.RELEASE_EVENT: release,
+        }[event.tag]()
+
+    def _release(self) -> None:
+        global root
+        self._pressed()
+        root.grab_focus(self)
+        self.pressed.emit()
+
+    def _hold(self) -> None:
+        global root
+        self._mouse_input = self._holding
+        self._on_hold()
+        self.is_pressed = True
+
+    @abstractmethod
+    def _on_hold(self) -> None:
+        '''Método virtual chamado logo que o botão for pressionado.'''
+
+    @abstractmethod
+    def _pressed(self) -> None:
+        '''Método virtual chamado após o botão ter sido pressionado.'''
+
+    @abstractmethod
+    def _focused_mouse_input(self) -> None:
+        '''Método virtual chamado enquanto o botão está selecionado.'''
+
+    @abstractmethod
+    def _unfocused_mouse_input(self) -> None:
+        '''Método virtual chamado enquanto o botão está fora de foco.'''
+
+    @abstractmethod
+    def _holding(self) -> None:
+        '''Método virtual chamado enquanto o botão está sendo pressionado'''
+
+    def _update_rect(self) -> None:
+        area: array = array(self.get_cell()) * self.scale
+        self._rect.topleft = self.position - area * self.anchor
+        self._rect.size = area
 
     def set_anchor(self, value: tuple[int, int]) -> None:
         super().set_anchor(value)
         self.label.anchor = value
 
     def set_is_on_focus(self, value: bool) -> None:
+        if value:
+            root.grab_focus(self)
+            return
+        self._set_is_on_focus(value)
+
+    def _set_is_on_focus(self, value: bool) -> None:
         self._is_on_focus = value
         self._mouse_input = self._focused_mouse_input if value else self._unfocused_mouse_input
+        self.focus_changed.emit(value)
 
     def get_is_on_focus(self) -> bool:
         return self._is_on_focus
 
-    def __init__(self, font: font.Font, name: str = 'Button', coords: tuple[int, int] = VECTOR_ZERO,
-                 bg_color: Color = colors.WHITE, borders_color: Color = colors.GRAY,
-                 size: tuple[int, int] = None, padding: tuple[int, int] = (20, 5), text: str = '',
-                 borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS) -> None:
+    def __init__(self, font: font.Font, name: str = 'BaseButton',
+                 coords: tuple[int, int] = VECTOR_ZERO, anchor: tuple[int, int] = TOP_LEFT,
+                 size: tuple[int, int] = None, padding: tuple[int, int] = (20, 5),
+                 text: str = '') -> None:
         '''
         If `size` is not passed, the button `size` will be calculated
         based on the `padding`, the `text` and the `font`.
         '''
-        if size == None:
-            size = array(font.size(text)) + padding
+        self.label = Text(font, anchor=anchor)
+        self.label.set_text(text)
 
-        super().__init__(name=name, coords=coords, bg_color=bg_color,
-                         borders_color=borders_color, size=size, borders=borders)
-        self._mouse_input: Callable = self._unfocused_mouse_input
+        if size is None:
+            self.size = array(self.label.size) + array(padding) * 2
+
+        super().__init__(name=name, coords=coords, anchor=anchor)
         self.pressed = Node.Signal(self, 'pressed')
+        self.focus_changed = Node.Signal(self, 'focus_changed')
 
-        label: Label = Label(font, coords=(
-            borders[X], borders[Y]), color=colors.BLACK, text=text)
-        self.label = label
-        self.add_child(label)
+        self.color = colors.BLUE
+        self._rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
+        self._mouse_input: Callable[[], None] = self._unfocused_mouse_input
+        self._is_on_focus = False
+
+        self.add_child(self.label)
 
         # Registra os eventos de entrada do mouse
-        input.register_event(self, MOUSEBUTTONUP,
-                             Input.Mouse.LEFT_CLICK, Button.CLICK_EVENT)
+        input.register_event(
+            self, MOUSEBUTTONDOWN, Input.Mouse.LEFT_CLICK, BaseButton.HOLD_EVENT)
+        input.register_event(
+            self, MOUSEBUTTONUP, Input.Mouse.LEFT_CLICK, BaseButton.RELEASE_EVENT)
+        self._update_rect()
 
     is_on_focus: property = property(get_is_on_focus, set_is_on_focus)
+
+
+class Link(BaseButton):
+    normal_color: Color = colors.BLUE
+    pressed_color: Color = colors.GREEN
+    highlight_color: Color = colors.CYAN
+    focus_color: Color = colors.PURPLE
+
+    def _on_hold(self) -> None:
+        self.set_color(self.pressed_color)
+
+    def _focused_mouse_input(self) -> None:
+
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self.set_color(self.highlight_color.lerp(self.focus_color, .5))
+        else:
+            self.set_color(self.focus_color)
+
+    def _unfocused_mouse_input(self) -> None:
+        self._update_rect()
+
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self.set_color(self.highlight_color)
+        else:
+            self.set_color(self.normal_color)
+
+    def open_link(self) -> None:
+        webbrowser.open(self._action)
+
+    def set_color(self, value: Color) -> None:
+        super().set_color(value)
+        self.label.set_color(value)
+
+    def set_action(self, value: str) -> None:
+        self._action = value
+
+        if value.startswith('https://'):
+            self._do_action = self.open_link
+        else:
+            self._do_action = lambda: None
+
+    def get_action(self) -> None:
+        return self._action
+
+    def __init__(self, font: font.Font, name: str = 'Link', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT, size: tuple[int, int] = None,
+                 padding: tuple[int, int] = (20, 5), text: str = '', action: str = '') -> None:
+        super().__init__(font, name=name, coords=coords,
+                         anchor=anchor, size=size, padding=padding, text=text)
+        self.set_color(self.color)
+        self._do_action: Callable
+        self._action: str
+        self.set_action(action)
+
+    action: property = property(get_action, set_action)
+
+
+class TextureButton(BaseButton):
+    normal_icon_id: int = 0
+    pressed_icon_id: int = 1
+    hover_icon_id: int = 2
+    # Extras
+    focus_icon_id: int = 1
+    highlight_icon_id: int = 2  # Alternativa ao hover quando em foco
+
+    _sprite: Sprite
+    _icon: Icon
+
+    class NoTexture(UserWarning):
+        '''A lista de texturas passada ao nó está vazia.'''
+
+    def _on_hold(self) -> None:
+        self._icon.set_texture(self.pressed_icon_id)
+
+    def _focused_mouse_input(self) -> None:
+
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self._icon.set_texture(self.highlight_icon_id)
+        else:
+            self._icon.set_texture(self.focus_icon_id)
+
+    def _unfocused_mouse_input(self) -> None:
+
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self._icon.set_texture(self.hover_icon_id)
+        else:
+            self._icon.set_texture(self.normal_icon_id)
+
+    def _update_rect(self) -> None:
+        label_size: tuple[int, int] = self.label.get_cell()
+        icon_size: tuple[int, int] = self._sprite.get_cell()
+        self.size = max(label_size[X], icon_size[X]), max(
+            label_size[Y], icon_size[Y])
+        super()._update_rect()
+
+    def __init__(self, font: font.Font, textures: list[Surface], name: str = 'TextureButton',
+                 coords: tuple[int, int] = VECTOR_ZERO, size: tuple[int, int] = None,
+                 padding: tuple[int, int] = (20, 5), text: str = '') -> None:
+        super().__init__(font, name=name, coords=coords,
+                         size=size, padding=padding, text=text)
+        self._icon = Icon(textures)
+        self._sprite = Sprite(atlas=self._icon)
+        self._update_rect()
+        self._sprite.position = array(
+            (0, self.label.get_cell()[X])) - self.get_cell() * self.anchor
+
+        if not textures:
+            raise TextureButton.NoTexture
+
+        # Fallback to normal
+        if len(textures) < 2:
+            self.highlight_icon_id = self.hover_icon_id = 0
+
+            if len(textures) < 1:
+                self.focus_icon_id = self.pressed_icon_id = 0
+
+
+class RichTextLabel(Control):
+    default_font: font.Font
+    fonts: dict[str, font.Font]
+
+    _content: list[Node]
+    _text: str = ''
+
+    def set_rich_text(self, *text: str) -> None:
+        '''Faz o processamento da string via conversão de tags (parser)
+        para renderizá-la numa caixa de texto inteligente.'''
+
+        txt: str = ''.join(text)
+        metadata: deque[dict[str, ]] = deque()
+
+        # Busca por
+        # `<a = path/link/or/event > ... <\a>` (links) or
+        # <img = path/to/icon /> (icons)
+        matches: Iterator[Match] = re.finditer(
+            r'(<a.*>.*</a[ ]*>)|(<img.*>.*</img[ ]*>)', txt)
+
+        def filter(match: Match) -> str:
+            meta: str
+
+            # TODO -> Adicionar dados anexos
+            for tag, dtype in {'<a': 'link', '<img': 'icon'}.items():
+                if txt[match.start():match.end()].startswith(tag):
+                    meta = dtype
+                    break
+
+            return meta
+
+        def add_text(start: int, end: int) -> None:
+            nonlocal metadata
+            metadata.append({'type': 'text', 'span': (start, end)})
+
+        parser_index: int = 0
+        match: Match
+        # Divide as seções de acordo com as correspondências
+        for match in matches:
+            if match.start() != parser_index:
+                add_text(parser_index, match.start())
+
+            span: tuple = match.span()
+            metadata.append({'type': filter(match), 'span': span})
+            parser_index = span[1]
+
+        if len(txt) > parser_index:
+            add_text(parser_index, len(txt))
+
+        # Processa o layout/ aparência de cada seção do texto
+        section_id: int = 0
+        current_offset: tuple[int, int] = VECTOR_ZERO
+        current_color: Color = self.color
+        current_font: font.Font = self.default_font
+        area: Rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
+
+        def add_text(i: int, span: tuple[int, int]) -> Node:
+            nonlocal self, txt, current_font, current_color, current_offset, area
+
+            text: Text = Text(current_font, name=f'Text{i}', coords=(
+                0, current_offset[Y]), anchor=self.anchor, color=current_color)
+            text.set_text(txt[span[0]:span[1]])
+            self._content.append(text)
+            self.add_child(text)
+            area = area.union(Rect((0, current_offset[Y]), text.get_cell()))
+            current_offset = text.position + text.size
+
+        def add_link(i: int, span: tuple[int, int]) -> None:
+            nonlocal self, txt, current_font, current_color, current_offset
+            text: str = txt[span[0]:span[1]]
+            open_tag: Match = re.search(r'>', text)
+            close_tag: Match = re.search(r'</a[ ]*>', text)
+
+            link: Link = Link(
+                current_font, name=f'Link{i}', coords=(0, current_offset[Y]),
+                anchor=self.anchor, text=text[open_tag.end():close_tag.start()])
+            self._content.append(link)
+            self.add_child(link)
+            area.union(Rect((0, current_offset[Y]), link.get_cell()))
+            current_offset = link.position + link.size
+
+        def add_icon(i: int, to_pos: tuple[int, int]) -> None:
+            # TODO
+            #icon: Icon()
+            pass
+
+        while metadata:
+            content: dict[str, ] = metadata.popleft()
+            {
+                'text': add_text,
+                'link': add_link,
+                'icon': add_icon,
+            }[content['type']](section_id, content['span'])
+            section_id += 1
+
+        # Desloca o conteúdo de acordo com a âncora da caixa de texto
+        # for item in self._content:
+        #     item.position[Y] = item.position[Y] - area.size[Y] * self.anchor[Y]
+
+        self.size = area.size
+
+    def get_rich_text(self) -> str:
+        return self._text
+
+    def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
+                 name: str = 'RichTextLabel', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT, color: Color = colors.WHITE) -> None:
+        super().__init__(name=name, coords=coords, anchor=anchor)
+        self._content = []
+        self.default_font = default_font
+        self.color = color
+
+
+class Button(BaseButton):
+    normal_color: Color = colors.WHITE
+    highlight_color: Color = colors.CYAN
+    focus_color: Color = colors.BLUE
+    pressed_color: Color = colors.GREEN
+
+    pressed: Node.Signal
+    panel: Panel
+    _is_on_focus: bool = False
+
+    def _pressed(self) -> None:
+        self.color = self.pressed_color
+
+    def _unfocused_mouse_input(self) -> None:
+
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self.panel.bg.color = self.highlight_color
+        else:
+            self.panel.bg.color = self.normal_color
+
+    def _focused_mouse_input(self) -> None:
+        if self._rect.collidepoint(pygame.mouse.get_pos()):
+            self.panel.bg.color = self.highlight_color.lerp(
+                self.focus_color, .5)
+        else:
+            self.panel.bg.color = self.focus_color
+
+    def set_anchor(self, value: tuple[int, int]) -> None:
+        super().set_anchor(value)
+        self.panel.set_anchor(value)
+
+    def _on_Label_text_changed(self) -> None:
+        self.size = array(self.label.size) + array(self._padding) * 2
+        self.panel.size = self.size
+
+    def __init__(self, font: font.Font, name: str = 'BaseButton',
+                 coords: tuple[int, int] = VECTOR_ZERO, anchor: tuple[int, int] = TOP_LEFT,
+                 size: tuple[int, int] = None, padding: tuple[int, int] = (20, 5),
+                 text: str = '') -> None:
+        '''
+        If `size` is not passed, the button `size` will be calculated
+        based on the `padding`, the `text` and the `font`.
+        '''
+        self.panel = Panel()
+        super().__init__(font, name=name, coords=coords, anchor=anchor,
+                         size=size, padding=padding, text=text)
+        self._padding: tuple[int, int] = padding
+        self.panel.bg.color = self.color
+        self.panel.size = self.size
+        self.add_child(self.panel, 0)
+        self.set_anchor(anchor)
+
+        self.label.connect(self.label.text_changed, self,
+                           self._on_Label_text_changed)
+
+
+class PopupDialog(Popup):
+    label: RichTextLabel
+
+    def set_text(self, *value: str) -> None:
+        self.label.set_rich_text(*value)
+        self._base_size = array(self.label.size) + \
+            (self._borders[X], self._borders[Y]) + \
+            (self._borders[W], self._borders[H]) + \
+            (self._padding[X], self._padding[Y]) + \
+            (self._padding[W], self._padding[H])
+
+    def set_anchor(self, value: tuple[int, int]) -> None:
+        super().set_anchor(value)
+        self.label.anchor = value
+
+    def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
+                 name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
+                 anchor: tuple[int, int] = TOP_LEFT, do_ease: bool = True,
+                 pop_duration: float = 0.3, bg_color: Color = colors.WHITE,
+                 borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
+                 borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS,
+                 padding: tuple[int, int, int, int] = (32, 32, 32, 32)) -> None:
+        label: RichTextLabel = RichTextLabel(
+            default_font, fonts, name='Dialog',  anchor=anchor)
+        self.label = label
+        self._padding: tuple[int, int, int, int] = padding
+        size = array(size) + (padding[X], padding[Y]
+                              ) + (padding[W], padding[H])
+        super().__init__(name=name, coords=coords, anchor=anchor, do_ease=do_ease,
+                         pop_duration=pop_duration,  bg_color=bg_color, borders_color=borders_color,
+                         size=size, borders=borders)
+        label.color = colors.BLACK
+        self.add_child(label)
 
 
 class PhysicsHelper():
@@ -1769,9 +2166,6 @@ class SceneTree(Node):
     _screen_rect: Rect = Rect(VECTOR_ZERO, (_screen_width, _screen_height))
     screen_color: Color = colors.WHITE
 
-    # Fila de renderização (para labels e outras superfícies)).
-    render_queue: deque[Surface, tuple[int, int]] = deque()
-
     # PyGame Sprites Groups
     DEFAULT_GROUP: str = 'default'
 
@@ -1794,6 +2188,10 @@ class SceneTree(Node):
     _locales: dict[str, ]
     _current_scene: Node = None
     _last_time: float = 0.0
+
+    FOCUS_ACTION_DOWN: str = 'focus_action_down'
+    FOCUS_ACTION_UP: str = 'focus_action_up'
+    _current_focus: BaseButton = None
 
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
@@ -1837,15 +2235,7 @@ class SceneTree(Node):
 
             self._propagate(delta)
             # Propaga o processamento
-
-            for id, sprites in self.sprites_groups.items():
-                # Desenha os sprites
-                sprites.draw(self.screen)
-                sprites.update()
-
-            while self.render_queue:
-                # Desenha a GUI
-                self.screen.blit(*self.render_queue.popleft())
+            # `Sprites` e `Labels`` aplicam blit individualmente no método `_draw``
 
             pygame.display.update()
 
@@ -1892,6 +2282,14 @@ class SceneTree(Node):
         '''Verifica se o nó pertence a um grupo determinado.'''
         return group in node._current_groups
 
+    def grab_focus(self, node: BaseButton) -> None:
+
+        if not self._current_focus is None:
+            self._current_focus._set_is_on_focus(False)
+
+        node._set_is_on_focus(True)
+        self._current_focus = node
+
     def get_fps(self) -> float:
         return self.clock.get_fps()
 
@@ -1900,16 +2298,19 @@ class SceneTree(Node):
         self._locales_dir = dir
 
     def set_locale(self, to: str) -> None:
-        self._locale = to
 
         if to in self._cached_locales:
             self._locales = self._cached_locales[to]
         else:
             if self._locale:
                 self._cached_locales[self._locale] = self._locales
-                self.locale_changed.emit(to)
 
             self._locales = self._locale_load_method(self._locales_dir, to)
+
+        if self._locale != to:
+            self.locale_changed.emit(to)
+
+        self._locale = to
 
     def tr(self, key: str) -> None:
         '''Retorna uma string de acordo com a locale (tradução) carregada no momento'''
@@ -1941,6 +2342,16 @@ class SceneTree(Node):
     def get_current_scene(self) -> Node:
         return self._current_scene
 
+    def _input_event(self, event: InputEvent) -> None:
+        # FOCUS_ACTION
+        if not self._current_focus:
+            return
+
+        if event.tag is SceneTree.FOCUS_ACTION_DOWN:
+            self._current_focus._hold()
+        else:
+            self._current_focus._release()
+
     def __new__(cls):
         # Torna a classe em uma Singleton
         if cls._instance is None:
@@ -1960,6 +2371,10 @@ class SceneTree(Node):
         # Events
         self.pause_toggled = Node.Signal(self, 'pause_toggled')
         self.locale_changed = Node.Signal(self, 'locale_changed')
+
+        for key in (K_RETURN, K_SPACE, K_KP_ENTER):
+            input.register_event(self, KEYDOWN, key, SceneTree.FOCUS_ACTION_UP)
+            input.register_event(self, KEYUP, key, SceneTree.FOCUS_ACTION_DOWN)
 
     screen_size: property = property(get_screen_size, set_screen_size)
     current_scene: property = property(get_current_scene, set_current_scene)

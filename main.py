@@ -58,8 +58,8 @@ def fetch_locales(dir: str, locale: str) -> dict[str, str]:
     return locales
 
 
-def get_locale() -> str:
-    key: str = locale.getdefaultlocale()[0][:2]
+def filter_locale(from_key: str) -> str:
+    key: str = from_key[:2]
     
     if key in ['pt', 'en']:
         return key
@@ -84,9 +84,13 @@ SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
 GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
 DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
 TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
+lang: str = filter_locale(argv[argv.index('-l') + 1]) if '-l' in argv else None
+
+if lang is None:
+    lang = filter_locale(locale.getdefaultlocale()[0][:2])
 
 root.set_load_method(fetch_locales, LOCALES_DIR)
-root.set_locale(get_locale())
+root.set_locale(lang)
 
 spritesheet_data: dict[str, list[dict]] = fetch_spritesheet(
     path.join(SPRITES_DIR, 'sheet1.json'))

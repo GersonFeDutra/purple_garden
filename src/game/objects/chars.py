@@ -144,7 +144,7 @@ class Player(Char):
         rect: Rect = Rect(VECTOR_ZERO, array(VECTOR_ONE) * 16)
         # rect.size -= array([16, 16])
         shape.rect = rect
-        self.add_child(shape)
+        self.add_child(shape, 0)
 
         # Signals
         self.points_changed = Entity.Signal(self, 'points_changed')
@@ -201,7 +201,7 @@ class Cactus(Runner):
         rect: Rect = Rect(sprite.atlas.rect)
         rect.size = rect.size - array([16, 8])
         shape.rect = rect
-        self.add_child(shape)
+        self.add_child(shape, 1)
         self.notifier.rect = Rect((0, 0), rect.size + array([6, 6]))
 
 
@@ -233,7 +233,7 @@ class PteroDino(Runner):
         rect: Rect = Rect(sprite.atlas.rect)
         rect.size -= array([16, 16])
         shape.rect = rect
-        self.add_child(shape)
+        self.add_child(shape, 1)
 
         # Connect to events
         root.connect(root.pause_toggled, self, self._on_Game_pause_toggled)
