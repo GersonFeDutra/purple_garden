@@ -6,9 +6,14 @@ from .vectors import X, Y
 
 '''Global Helper "Static" Methods'''
 
+
 def lerp(_from_: float, _to_: float, _delta_: float) -> float:
     '''Realiza uma interpolação linear de `_from_` para `_to_` em termos de `_delta_`.'''
     return (_from_ - _to_) * _delta_
+
+
+def clamp(from_min, value, to_max):
+    return min(max(from_min, value), to_max)
 
 
 def draw_bounds(at: Surface, target_pos: array, extents: array,

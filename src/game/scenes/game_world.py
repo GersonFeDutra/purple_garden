@@ -113,11 +113,15 @@ class GameWorld(Node):
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
         root.screen_color = colors.WHITE
+
         # Construção da cena
         level: Level = Level(spritesheet_old, spritesheet,
                              spritesheet_data, sound_fxs)
         gui: GUI = GUI(spritesheet, spritesheet_data, default_font, gui_font)
-        self.add_child(level)
+
+        level_layer: CanvasLayer = CanvasLayer(name='LevelLayer')
+        self.add_child(level_layer)
+        level_layer.add_child(level)
         self.add_child(gui)
 
         # Conexões
@@ -125,6 +129,11 @@ class GameWorld(Node):
         spawner: Spawner = level.spawner
         bg: BackGround = level.bg
         display: GameOverDisplay = gui.game_over_display
+
+        camera: Camera = Camera(Camera.FollowLimit(
+            player, (*VECTOR_ZERO, root._screen_width * 2, root._screen_height)))
+        level_layer.add_child(camera)
+        level_layer.active_camera = camera
 
         # spawn.connect(spawn.collected, score_sfx, score_sfx.play)
         # player.connect(player.points_changed, label, label.set_text)

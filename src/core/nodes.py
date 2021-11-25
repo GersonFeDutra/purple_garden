@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Callable, Iterator, Match
 
 import pygame
@@ -122,6 +122,8 @@ class Entity:
         if target_scale is None:
             target_scale = self.scale
 
+        target_pos = target_pos + array(self._layer.offset())
+
         # Desenha o Gizmo
         extents: array = GIZMO_RADIUS * target_scale
         draw.line(root.screen, self._color,
@@ -180,6 +182,7 @@ class Entity:
         self._color: Color = Color(0, 185, 225, 125)
         self._debug_fill_bounds: bool = False
         self._draw_cell = IS_DEBUG_ENABLED
+        self._layer: CanvasLayer = None
 
     color: property = property(get_color, set_color)
     anchor: property = property(get_anchor, set_anchor)
@@ -288,6 +291,7 @@ class Node(Entity):
         '''Método virtual que é chamado logo após o nó ser inserido a árvore.
         Chamado após este nó ou algum antecedente ser inserido como filho de outro nó na árvore.'''
         self._is_on_tree = True
+        self._layer = self._parent._layer
 
         for child in self._children_index:
             child._enter_tree()
@@ -355,6 +359,7 @@ class Node(Entity):
         pass
 
     def __init__(self, name: str = 'Node', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        global root
         super().__init__(coords=coords)
 
         if not name:
@@ -366,6 +371,108 @@ class Node(Entity):
         self._children_refs: dict[str, Node] = {}
         self._parent: Node = None
         self._current_groups: list[str] = []
+
+
+class Camera(Node):
+
+    class ScrollNotDefined(UserWarning):
+        '''Warning emitido se nenhum método de rolagem for passado.'''
+
+    class Scroll(ABC):
+        '''Classe abstrata usado para definir o método de rolagem da câmera.
+        Implementação inspirada na strategy pattern.'''
+        target: Node
+
+        @abstractmethod
+        def scroll(self, delta: float) -> None:
+            '''Método virtual responsável pela rolagem da câmera.'''
+
+        def __init__(self, target: Node) -> None:
+            super().__init__()
+            self.target = target
+            self.camera: Camera = None
+
+    class Follow(Scroll):
+
+        def scroll(self, delta: float) -> None:
+            self.camera.raw_offset.xy = - \
+                array(self.target.get_global_position())
+
+            self.camera.raw_offset += self.target.get_cell() + \
+                (self.camera.get_cell() * array(self.camera.anchor) +
+                 self.target.get_cell() * array(self.target.anchor))
+            self.camera.position = array(self.camera.raw_offset, dtype=int)
+
+        def __init__(self, target: Node) -> None:
+            super().__init__(target)
+
+    class FollowLimit(Follow):
+        limit: tuple[int, int, int, int]
+
+        def scroll(self, delta: float) -> None:
+            super().scroll(delta)
+            self.camera.position = clamp(self.limit[X], self.camera.position[X], self.limit[W]), \
+                clamp(self.limit[Y], self.camera.position[Y], self.limit[H])
+
+        def __init__(self, target: Node, limit: tuple[int, int, int, int]) -> None:
+            super().__init__(target)
+            self.limit = limit
+
+    # offset: tuple[int, int]
+    raw_offset: Vector2
+    scroll: Scroll = None
+
+    def _process(self, delta: float):
+        self.scroll.scroll(delta)
+
+    def get_cell(self) -> tuple[int, int]:
+        global root
+        return root.screen_size
+
+    def __init__(self, scroll: Scroll, name: str = 'Camera', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+
+        if scroll is None:
+            raise Camera.ScrollNotDefined()
+        else:
+            self.scroll = scroll
+            scroll.camera = self
+
+        self.offset = coords
+        self.raw_offset = Vector2(*coords)
+
+
+class CanvasLayer(Node):
+    NO_CAMERA_OFFSET: Callable[[], tuple[int, int]] = lambda: VECTOR_ZERO
+
+    def _enter_tree(self) -> None:
+        self._is_on_tree = True
+        self._layer = self
+
+        for child in self._children_index:
+            child._enter_tree()
+
+    def _get_camera_offset(self) -> None:
+        return self.active_camera.position
+
+    def set_active_camera(self, value: Camera) -> None:
+        self._active_camera = value
+
+        if value:
+            self.offset = self._get_camera_offset
+        else:
+            self.offset = CanvasLayer.NO_CAMERA_OFFSET
+
+    def get_active_camera(self) -> Camera:
+        return self._active_camera
+
+    def __init__(self, name: str = 'CanvasLayer', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+        self.offset: Callable[[], tuple[int, int]
+                              ] = CanvasLayer.NO_CAMERA_OFFSET
+        self._active_camera: Camera = None
+
+    active_camera: property = property(get_active_camera, set_active_camera)
 
 
 class Input:
@@ -1007,6 +1114,7 @@ class Sprite(Node):
 
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
               offset: tuple[int, int]) -> None:
+        global root
         super()._draw(target_pos, target_scale, offset)
 
         # REFACTOR -> Fazer as transforms serem recalculadas _JIT_ (Just In Time).
@@ -1015,7 +1123,8 @@ class Sprite(Node):
         self.atlas.rect.topleft = array(target_pos) - offset
 
         # Draw sprite in order
-        root.screen.blit(self.atlas.image, self.atlas.rect)
+        root.screen.blit(self.atlas.image, Rect(array(
+            self.atlas.rect.topleft) + self._layer.offset(), self.atlas.rect.size))
         self.atlas.update()
 
     def get_cell(self) -> array:
@@ -2151,7 +2260,7 @@ class PhysicsHelper():
 
 
 # root
-class SceneTree(Node):
+class SceneTree(CanvasLayer):
     '''Nó singleton usado como a rais da árvore da cena.
     Definido dessa forma para facilitar acessos globais.'''
     pause_toggled: Node.Signal
@@ -2367,6 +2476,7 @@ class SceneTree(Node):
         self._locales_dir: str = ''
         self._cached_locales: dict[str, dict[str, ]] = {}
         self._locale_load_method: Callable[[str, str], dict[str, ]] = None
+        self._layer = self
 
         # Events
         self.pause_toggled = Node.Signal(self, 'pause_toggled')
