@@ -47,6 +47,8 @@ def fetch_spritesheet(from_path: str) -> dict[str, list[dict]]:
 
 
 def fetch_locales(dir: str, locale: str) -> dict[str, str]:
+    '''Função auxiliar para importar traduções de strings
+    a partir de um arquivo JSON criado no editor Aseprite.'''
     print("Started reading locales JSON file...")
     locales: dict[str, str]
 
@@ -59,12 +61,13 @@ def fetch_locales(dir: str, locale: str) -> dict[str, str]:
 
 
 def filter_locale(from_key: str) -> str:
+    '''Verifica se a chave passada está presente nas traduções disponíveis.'''
     key: str = from_key[:2]
-    
+
     if key in ['pt', 'en']:
         return key
-    
-    return 'en' # Fallback to english
+
+    return 'en'  # Fallback to english
 
 
 # Setup the Engine
@@ -118,11 +121,11 @@ for sfx in ['death', 'score', 'jump']:
 # Sets the first scene.
 
 if IS_DEBUG_ENABLED:
-    # root.current_scene = GameWorld(
-    #     spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT, GUI_FONT)
-    root.current_scene = TitleScreen(
-        spritesheet_old, spritesheet, spritesheet_data,
-        sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
+    root.current_scene = GameWorld(
+        spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT, GUI_FONT)
+    # root.current_scene = TitleScreen(
+    #     spritesheet_old, spritesheet, spritesheet_data,
+    #     sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
 else:
     root.current_scene = TitleScreen(
         spritesheet_old, spritesheet, spritesheet_data,

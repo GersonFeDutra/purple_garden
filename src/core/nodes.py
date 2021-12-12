@@ -3,8 +3,7 @@ from typing import Callable, Iterator, Match
 
 import pygame
 from pygame import Color, Surface, Vector2
-from pygame import sprite, draw, font
-from pygame import color
+from pygame import sprite, draw, font, mouse, transform
 from pygame.locals import *
 from sys import exit, argv
 
@@ -285,7 +284,12 @@ class Node(Entity):
         else:
             return tuple(self.position)
 
-    # def _parent
+    def get_global_scale(self) -> tuple[int, int]:
+
+        if self._parent:
+            return self._parent.get_global_scale() * self.scale
+        else:
+            return tuple(self.scale)
 
     def _enter_tree(self) -> None:
         '''Método virtual que é chamado logo após o nó ser inserido a árvore.
@@ -468,8 +472,8 @@ class CanvasLayer(Node):
 
     def __init__(self, name: str = 'CanvasLayer', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-        self.offset: Callable[[], tuple[int, int]
-                              ] = CanvasLayer.NO_CAMERA_OFFSET
+        self.offset: Callable[[], tuple[int, int]] = \
+            CanvasLayer.NO_CAMERA_OFFSET
         self._active_camera: Camera = None
 
     active_camera: property = property(get_active_camera, set_active_camera)
@@ -491,7 +495,7 @@ class Input:
         '''Lançado ao tentar registrar um evento em um objeto que não e do tipo `Node`.'''
         pass
 
-    def register_event(self, to: Node, input_type: int, key: int, tag: str = "") -> None:
+    def register_event(self, to: Node, input_type: int, key: int, tag: str = '') -> None:
 
         if not isinstance(to, Node):
             raise Input.NotANode
@@ -891,12 +895,13 @@ class Icon(BaseAtlas):
     '''Atlas básico para imagens estáticas. Pode comportar múltiplas texturas,
     requer manipulação externa da lista.'''
     textures: list[Surface]
+    texture_id: int = 0
 
     @staticmethod
     def get_spritesheet(texture: Surface, h_slice: int = 1, v_slice: int = 1,
                         coords: tuple[int, int] = VECTOR_ZERO,
                         sprite_size: tuple[int, int] = None) -> list[Surface]:
-        '''Realiza o fatiamento da textura de uma spritesheet como a sequencia de surfaces.'''
+        '''Realiza o fatiamento da textura de uma spritesheet como uma sequencia de surfaces.'''
         sheet: list[Surface] = []
 
         if sprite_size is None:
@@ -911,6 +916,7 @@ class Icon(BaseAtlas):
         return sheet
 
     def set_texture(self, id: int) -> None:
+        self.texture_id = id
         self.image: Surface = self.textures[id]
         self.rect = self.image.get_rect()
         self.base_size = array(self.image.get_size())
@@ -1251,6 +1257,185 @@ class VisibilityNotifier(Shape):
         self.screen_entered = Node.Signal(self, 'screen_entered')
         self._was_draw_once: bool = False
         self._shift: Callable = self.set_on_screen
+
+
+class TileMap(Node):
+    width: int = 0
+    height: int = 0
+    grid: list[list[int]]
+    tiles: list[Icon]
+    textures: list[Surface]
+    _map: Surface = None
+    _map_scaled: Surface = None
+
+    def _enter_tree(self) -> None:
+        super()._enter_tree()
+        self._global_scale = super().get_global_scale()
+
+        if self.tiles:
+            self._update_tiles()
+
+    def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
+              offset: tuple[int, int]) -> None:
+        global root
+        super()._draw(target_pos, target_scale, offset)
+        root.screen.blit(self._map_scaled, Rect(self._layer.offset(), self._map_scaled.get_size()))
+
+    def get_global_scale(self) -> tuple[int, int]:
+        return self._global_scale
+
+    def get_cell(self) -> tuple[int, int]:
+        return array(self.get_size()) * self.scale
+
+    def set_tile(self, tile: Icon, col: int, row: int) -> None:
+        last_column: int = len(self.grid) - 1
+
+        if last_column < col:
+            # Grow X
+            diff: int = col - last_column
+
+            for i in range(diff):
+                self.grid.append([])
+
+            self.width = len(self.grid)
+            self._map = Surface(array(self.get_size()) * self.get_tile_size(), SRCALPHA)
+
+        row_tiles: list[int] = self.grid[col]
+        last_row: int = len(row_tiles) - 1
+
+        if last_row < row:
+            diff: int = row - last_row
+
+            for j in range(diff):
+                row_tiles.append(None)
+
+            # Grow Y
+            new_height: int = len(row_tiles)
+            if self.height < new_height:
+                self.height = new_height
+
+                self._map = Surface(array(self.get_size()) * self.get_tile_size(), SRCALPHA)
+
+        row_tiles[row] = len(self.tiles)
+        self.tiles.append(tile)
+
+        tile.rect.topleft = (
+            self._tile_size * self._global_scale).astype('int') * (col, row)
+
+    def get_tile(self, col: int, row: int) -> Icon:
+        tile: Icon
+
+        try:
+            id: int = self.grid[col][row]
+
+            if id is None:
+                tile = id
+            else:
+                tile = self.tiles[id]
+
+        except IndexError:
+            tile = None
+
+        return tile
+
+    def del_tile(self, col: int, row: int) -> None:
+
+        if len(self.grid) < col:
+            return
+
+        row_tiles: list[int] = self.grid[col]
+        if len(row_tiles) < row:
+            return
+
+        id: int = row_tiles[row]
+        if id is None:
+            return
+
+        tile: Icon = self.tiles.pop(id)
+        row_tiles[row] = None
+        
+        if tile:
+            tile_coord: tuple[int, int] = self._tile_size * (col, row)
+            
+            for x in range(tile_coord[X], tile_coord[X] + self._tile_size[X]):
+                for y in range(tile_coord[Y], tile_coord[Y] + self._tile_size[Y]):
+                    self._map.set_at((x, y), colors.TRANSPARENT)
+
+        while row_tiles:
+            if row_tiles[-1] is None:
+                row_tiles.pop()
+            else:
+                return
+
+        while self.grid:
+            if self.grid[-1]:
+                return
+            else:
+                self.grid.pop()
+
+    def set_tile_id(self, col: int, row: int, id: int) -> None:
+        try:
+            i: int = self.grid[col][row]
+            self.tiles[i].set_texture(id)
+            tile: Icon = self.tiles[i]
+
+            if self._is_on_tree:
+                tile.rect.topleft = self._tile_size * (col, row)
+                
+                self._map.blit(tile.image, tile.rect)
+                self._update_scaled_map()
+        except IndexError:
+            self.del_tile(col, row)
+
+    def set_tile_area(
+            self, tile: Icon, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
+        id: int = tile.textures.index(tile.image)
+
+        for i in range(from_col, to_col):
+            for j in range(from_row, to_row):
+                new_tile: Icon = Icon(tile.textures)
+                new_tile.set_texture(id)
+                self.set_tile(new_tile, i, j)
+
+    def set_tile_size(self, value: tuple[int, int]) -> None:
+        self._tile_size = array(value)
+
+    def get_tile_size(self) -> tuple[int, int]:
+        return self._tile_size
+
+    def get_size(self) -> tuple[int, int]:
+        return self.width, self.height
+
+    def _update_tiles(self) -> None:
+        '''Atualiza o mapa em uma única chamada.
+        Chamado automaticamente ao entrar na árvore.'''
+
+        for i, column in enumerate(self.grid):
+            for j, id in enumerate(column):
+                tile: Icon = self.tiles[id]
+                tile.rect.topleft = self._tile_size * (i, j)
+                tile.rect.size = tuple(self._tile_size)
+
+        for tile in self.tiles:
+            tile.image.set_alpha()
+            self._map.blit(tile.image, tile.rect)
+        
+        self._update_scaled_map()
+
+    def _update_scaled_map(self) -> None:
+        new_size: tuple[int, int] = array(self._map.get_size()) * self._global_scale
+        self._map_scaled = transform.scale(self._map, array(new_size, int))
+
+    def __init__(self, tile_size: tuple[int, int], name: str = 'TileMap',
+                 coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+        self.tiles = []
+        self.grid = []
+        self.textures = []
+        self._tile_size: array = array(tile_size)
+        self._global_scale: array = array(self.scale)
+
+    tile_size: property = property(get_tile_size, set_tile_size)
 
 
 class Panel(Control):
@@ -1697,14 +1882,14 @@ class BaseButton(Control):
             global root
             nonlocal self
 
-            if self._rect.collidepoint(pygame.mouse.get_pos()):
+            if self._rect.collidepoint(mouse.get_pos()):
                 self._hold()
 
         def release() -> None:
             global root
             nonlocal self
 
-            if self.is_pressed and self._rect.collidepoint(pygame.mouse.get_pos()):
+            if self.is_pressed and self._rect.collidepoint(mouse.get_pos()):
                 self._release()
 
         {
@@ -1813,7 +1998,7 @@ class Link(BaseButton):
 
     def _focused_mouse_input(self) -> None:
 
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self.set_color(self.highlight_color.lerp(self.focus_color, .5))
         else:
             self.set_color(self.focus_color)
@@ -1821,7 +2006,7 @@ class Link(BaseButton):
     def _unfocused_mouse_input(self) -> None:
         self._update_rect()
 
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self.set_color(self.highlight_color)
         else:
             self.set_color(self.normal_color)
@@ -1876,14 +2061,14 @@ class TextureButton(BaseButton):
 
     def _focused_mouse_input(self) -> None:
 
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self._icon.set_texture(self.highlight_icon_id)
         else:
             self._icon.set_texture(self.focus_icon_id)
 
     def _unfocused_mouse_input(self) -> None:
 
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self._icon.set_texture(self.hover_icon_id)
         else:
             self._icon.set_texture(self.normal_icon_id)
@@ -2045,13 +2230,13 @@ class Button(BaseButton):
 
     def _unfocused_mouse_input(self) -> None:
 
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self.panel.bg.color = self.highlight_color
         else:
             self.panel.bg.color = self.normal_color
 
     def _focused_mouse_input(self) -> None:
-        if self._rect.collidepoint(pygame.mouse.get_pos()):
+        if self._rect.collidepoint(mouse.get_pos()):
             self.panel.bg.color = self.highlight_color.lerp(
                 self.focus_color, .5)
         else:

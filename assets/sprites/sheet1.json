@@ -1,246 +1,36 @@
-{
-	"frames": [
-		{
-			"filename": "sheet1.aseprite",
-			"frame": {
-				"x": 0,
-				"y": 0,
-				"w": 480,
-				"h": 480
-			},
-			"rotated": false,
-			"trimmed": false,
-			"spriteSourceSize": {
-				"x": 0,
-				"y": 0,
-				"w": 480,
-				"h": 480
-			},
-			"sourceSize": {
-				"w": 480,
-				"h": 480
-			},
-			"duration": 100
-		}
-	],
-	"meta": {
-		"app": "http://www.aseprite.org/",
-		"version": "1.x-dev",
-		"format": "RGBA8888",
-		"size": {
-			"w": 480,
-			"h": 480
-		},
-		"scale": "1",
-		"slices": [
-			{
-				"name": "rose_idle",
-				"color": "#fe5b59ff",
-				"data": "4",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 64,
-							"y": 0,
-							"w": 32,
-							"h": 128
-						}
-					}
-				]
-			},
-			{
-				"name": "violet_idle",
-				"color": "#d186dfff",
-				"data": "4",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 96,
-							"y": 0,
-							"w": 32,
-							"h": 128
-						}
-					}
-				]
-			},
-			{
-				"name": "rose_attack",
-				"color": "#fe5b59ff",
-				"data": "6",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 128,
-							"y": 0,
-							"w": 32,
-							"h": 192
-						}
-					}
-				]
-			},
-			{
-				"name": "violet_attack",
-				"color": "#d186dfff",
-				"data": "6",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 160,
-							"y": 0,
-							"w": 32,
-							"h": 192
-						}
-					}
-				]
-			},
-			{
-				"name": "hermiga_walk",
-				"color": "#f3ce52ff",
-				"data": "4",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 256,
-							"y": 64,
-							"w": 32,
-							"h": 128
-						}
-					}
-				]
-			},
-			{
-				"name": "hermiga_idle",
-				"color": "#f3ce52ff",
-				"data": "3",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 288,
-							"y": 64,
-							"w": 32,
-							"h": 96
-						}
-					}
-				]
-			},
-			{
-				"name": "hermiga_damage",
-				"color": "#f3ce52ff",
-				"data": "1",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 288,
-							"y": 160,
-							"w": 32,
-							"h": 32
-						}
-					}
-				]
-			},
-			{
-				"name": "mosca_attack",
-				"color": "#57b9f2ff",
-				"data": "3",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 256,
-							"y": 192,
-							"w": 32,
-							"h": 96
-						}
-					}
-				]
-			},
-			{
-				"name": "mosca_fly",
-				"color": "#57b9f2ff",
-				"data": "5",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 288,
-							"y": 192,
-							"w": 32,
-							"h": 160
-						}
-					}
-				]
-			},
-			{
-				"name": "char_idle",
-				"color": "#6acd5bff",
-				"data": "3",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 0,
-							"y": 128,
-							"w": 16,
-							"h": 96
-						}
-					}
-				]
-			},
-			{
-				"name": "char_walk",
-				"color": "#6acd5bff",
-				"data": "4",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 16,
-							"y": 128,
-							"w": 16,
-							"h": 128
-						}
-					}
-				]
-			},
-			{
-				"name": "char_damage",
-				"color": "#6acd5bff",
-				"data": "1",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 32,
-							"y": 128,
-							"w": 16,
-							"h": 32
-						}
-					}
-				]
-			},
-			{
-				"name": "char_death",
-				"color": "#6acd5bff",
-				"data": "6",
-				"keys": [
-					{
-						"frame": 0,
-						"bounds": {
-							"x": 48,
-							"y": 128,
-							"w": 16,
-							"h": 192
-						}
-					}
-				]
-			}
-		]
-	}
+{ "frames": [
+   {
+    "filename": "sheet1.aseprite",
+    "frame": { "x": 0, "y": 0, "w": 480, "h": 480 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 480, "h": 480 },
+    "sourceSize": { "w": 480, "h": 480 },
+    "duration": 100
+   }
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "version": "1.x-dev",
+  "format": "RGBA8888",
+  "size": { "w": 480, "h": 480 },
+  "scale": "1",
+  "slices": [
+   { "name": "rose_idle", "color": "#fe5b59ff", "data": "4", "keys": [{ "frame": 0, "bounds": {"x": 64, "y": 0, "w": 32, "h": 128 } }] },
+   { "name": "violet_idle", "color": "#d186dfff", "data": "4", "keys": [{ "frame": 0, "bounds": {"x": 96, "y": 0, "w": 32, "h": 128 } }] },
+   { "name": "rose_attack", "color": "#fe5b59ff", "data": "6", "keys": [{ "frame": 0, "bounds": {"x": 128, "y": 0, "w": 32, "h": 192 } }] },
+   { "name": "violet_attack", "color": "#d186dfff", "data": "6", "keys": [{ "frame": 0, "bounds": {"x": 160, "y": 0, "w": 32, "h": 192 } }] },
+   { "name": "hermiga_walk", "color": "#f3ce52ff", "data": "4", "keys": [{ "frame": 0, "bounds": {"x": 256, "y": 64, "w": 32, "h": 128 } }] },
+   { "name": "hermiga_idle", "color": "#f3ce52ff", "data": "3", "keys": [{ "frame": 0, "bounds": {"x": 288, "y": 64, "w": 32, "h": 96 } }] },
+   { "name": "hermiga_damage", "color": "#f3ce52ff", "data": "1", "keys": [{ "frame": 0, "bounds": {"x": 288, "y": 160, "w": 32, "h": 32 } }] },
+   { "name": "mosca_attack", "color": "#57b9f2ff", "data": "3", "keys": [{ "frame": 0, "bounds": {"x": 256, "y": 192, "w": 32, "h": 96 } }] },
+   { "name": "mosca_fly", "color": "#57b9f2ff", "data": "5", "keys": [{ "frame": 0, "bounds": {"x": 288, "y": 192, "w": 32, "h": 160 } }] },
+   { "name": "char_idle", "color": "#6acd5bff", "data": "3", "keys": [{ "frame": 0, "bounds": {"x": 0, "y": 128, "w": 16, "h": 96 } }] },
+   { "name": "char_walk", "color": "#6acd5bff", "data": "4", "keys": [{ "frame": 0, "bounds": {"x": 16, "y": 128, "w": 16, "h": 128 } }] },
+   { "name": "char_damage", "color": "#6acd5bff", "data": "1", "keys": [{ "frame": 0, "bounds": {"x": 32, "y": 128, "w": 16, "h": 32 } }] },
+   { "name": "char_death", "color": "#6acd5bff", "data": "6", "keys": [{ "frame": 0, "bounds": {"x": 48, "y": 128, "w": 16, "h": 192 } }] },
+   { "name": "ground", "color": "#663649ff", "data": "3", "keys": [{ "frame": 0, "bounds": {"x": 320, "y": 32, "w": 32, "h": 96 } }] },
+   { "name": "marker", "color": "#bde5a5ff", "data": "1", "keys": [{ "frame": 0, "bounds": {"x": 320, "y": 320, "w": 32, "h": 32 } }] }
+  ]
+ }
 }

@@ -8,10 +8,6 @@ from ..utils import spritesheet_slice
 class Char(KinematicBody):
     sprite: Sprite
 
-    class SpriteSheetLoadError(UserWarning):
-        '''Fail Loading SpriteSheet. Color Code do Not Match'''
-        pass
-
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  name: str = 'Player', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color('#0d89c6')) -> None:
@@ -20,14 +16,8 @@ class Char(KinematicBody):
         # Set the Sprite
         atlas: AtlasBook = AtlasBook()
         self.sprite = Sprite(atlas=atlas)
-        slices: list[dict] = spritesheet_data.get(str(self.color))
-
-        if slices:
-            spritesheet_slice(spritesheet, slices, self.sprite.atlas)
-            atlas.set_current_animation('char_idle')
-        else:
-            warnings.warn('spritesheet load error', Char.SpriteSheetLoadError)
-
+        spritesheet_slice(spritesheet, spritesheet_data, self.color, atlas)
+        atlas.set_current_animation('char_idle')
         self.add_child(self.sprite)
 
 
@@ -45,7 +35,7 @@ class Player(Char):
     _start_position: tuple[int, int]
 
     was_collided: bool = False
-    speed: float = 1.0
+    speed: float = 10.0
 
     score_sfx: Sound = None
     death_sfx: Sound = None

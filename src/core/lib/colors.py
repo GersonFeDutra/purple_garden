@@ -1,6 +1,7 @@
 '''Color Constants'''
 from pygame import Color
 
+TRANSPARENT: Color = Color(0, 0, 0, 0)
 BLACK: Color = Color(0, 0, 0)
 WHITE: Color = Color(255, 255, 255)
 GRAY: Color = Color(127, 127, 127)

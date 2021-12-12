@@ -1,9 +1,8 @@
-from numpy.core.arrayprint import SubArrayFormat
 from src.core.nodes import *
+from ..consts import *
 from ..gui.ui import *
 from ..objects.chars import *
-from ..objects.props import *
-from ..consts import *
+from ..objects.ground import GroundGrid
 
 
 class GUI(Node):
@@ -72,7 +71,7 @@ class Level(Node):
     That is the "world" and all objects that can be interected with.'''
     player: Player
     spawner: Spawner
-    bg: BackGround
+    bg: GroundGrid
 
     def __init__(self, spritesheet_old: Surface, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
@@ -81,12 +80,16 @@ class Level(Node):
         # Nodes Setup
         FLOOR_COORD: float = root._screen_height - CELL_SIZE * SPRITES_SCALE[Y]
 
-        bg: BackGround = BackGround(spritesheet_old, 3)
+        # Set the BackGround Grid
+        size: tuple[int, int] = array(
+            root.screen_size) // array(self.scale * SPRITES_SCALE * CELL_SIZE, dtype=int)
+        bg: GroundGrid = GroundGrid(
+            size, CELL, SPRITES_SCALE, spritesheet, spritesheet_data)
+
         self.bg = bg
         spawner: Spawner = Spawner(
-            FLOOR_COORD, spritesheet_old, speed=bg.scroll_speed)
+            FLOOR_COORD, spritesheet_old, 3)
         self.spawner = spawner
-        # spawn: Spawn = Spawn(coords=(randint(0, root._screen_width), randint(0, root._screen_height)))
 
         player: Player = Player(
             spritesheet, spritesheet_data, sound_fxs['score'],
@@ -107,12 +110,12 @@ class Level(Node):
 class GameWorld(Node):
     '''First Game's Scene.'''
 
-    def __init__(self, spritesheet_old: Surface, spritesheet: SubArrayFormat,
+    def __init__(self, spritesheet_old: Surface, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
                  default_font: font.Font, gui_font: font.Font, name: str = 'GameWorld',
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-        root.screen_color = colors.WHITE
+        root.screen_color = colors.GRAY
 
         # Construção da cena
         level: Level = Level(spritesheet_old, spritesheet,
@@ -127,7 +130,7 @@ class GameWorld(Node):
         # Conexões
         player: Player = level.player
         spawner: Spawner = level.spawner
-        bg: BackGround = level.bg
+
         display: GameOverDisplay = gui.game_over_display
 
         camera: Camera = Camera(Camera.FollowLimit(
@@ -137,7 +140,6 @@ class GameWorld(Node):
 
         # spawn.connect(spawn.collected, score_sfx, score_sfx.play)
         # player.connect(player.points_changed, label, label.set_text)
-        player.connect(player.scored, bg, bg.speed_up)
         player.connect(player.scored, spawner, spawner.speed_up)
         player.connect(player.died, display, display.show)
         display.connect(display.game_resumed, spawner,
