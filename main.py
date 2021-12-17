@@ -104,8 +104,6 @@ root.sprites_groups = {
     PLAYER_GROUP: sprite.Group(),
     ENEMY_GROUP: sprite.Group(),
 }
-spritesheet_old: Surface = pygame.image.load(
-    path.join(SPRITES_DIR, 'dino.png'))
 spritesheet: Surface = pygame.image.load(
     path.join(SPRITES_DIR, 'sheet1.png')
 )
@@ -116,22 +114,15 @@ sound_fxs: dict[str, Sound] = {}
 for sfx in ['death', 'score', 'jump']:
     sound_fxs[sfx] = Sound(path.join(SOUNDS_DIR, f'{sfx}.wav'))
 
-
-# %%
 # Sets the first scene.
+root.current_scene = debug_call(
+    lambda: TitleScreen(
+        spritesheet, spritesheet_data, sound_fxs,
+        DEFAULT_FONT, GUI_FONT, TITLE_FONT),
+    lambda: GameWorld(
+        spritesheet, spritesheet_data,
+        sound_fxs, DEFAULT_FONT, GUI_FONT)
+)()
 
-if IS_DEBUG_ENABLED:
-    root.current_scene = GameWorld(
-        spritesheet_old, spritesheet, spritesheet_data, sound_fxs, DEFAULT_FONT, GUI_FONT)
-    # root.current_scene = TitleScreen(
-    #     spritesheet_old, spritesheet, spritesheet_data,
-    #     sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
-else:
-    root.current_scene = TitleScreen(
-        spritesheet_old, spritesheet, spritesheet_data,
-        sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT)
-
-
-# %%
 # Runs the Engine
 root.run()

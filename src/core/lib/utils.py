@@ -1,7 +1,7 @@
 from pygame import draw
 from pygame import Surface
 from pygame import Color
-from numpy import array
+from numpy import ndarray
 from .vectors import X, Y
 
 '''Global Helper "Static" Methods'''
@@ -16,11 +16,11 @@ def clamp(from_min, value, to_max):
     return min(max(from_min, value), to_max)
 
 
-def draw_bounds(at: Surface, target_pos: array, extents: array,
-                anchor: array, color: Color, fill=False) -> None:
+def draw_bounds(at: Surface, target_pos: ndarray, extents: ndarray,
+                anchor: ndarray, color: Color, fill=False) -> None:
 
-    minor: array = target_pos - extents * anchor
-    major: array = target_pos + extents * (1.0 - anchor)
+    minor: ndarray = target_pos - extents * anchor
+    major: ndarray = target_pos + extents * (1.0 - anchor)
     points: tuple = (
         (minor[X], minor[Y]), (major[X], minor[Y]),
         (major[X], major[Y]), (minor[X], major[Y])

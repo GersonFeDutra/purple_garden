@@ -1,24 +1,32 @@
 from pygame.mixer import Sound
-from random import choice
+from random import choice, randint
 from src.core.nodes import *
 from ..consts import *
-from ..utils import spritesheet_slice
+from ..utils import Steering, spritesheet_slice
+from .ground import Plant, Rose, Violet
 
 
 class Char(KinematicBody):
+    speed: float = 10.0
     sprite: Sprite
+    _velocity: Vector2
+    _animation_speed: float = 0.1
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 name: str = 'Player', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = Color('#0d89c6')) -> None:
+                 name: str = 'Char', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color('#0d89c6'), animation: str = None) -> None:
         super().__init__(name=name, coords=coords, color=color)
+        self._velocity = Vector2(*VECTOR_ZERO)
 
         # Set the Sprite
         atlas: AtlasBook = AtlasBook()
         self.sprite = Sprite(atlas=atlas)
         spritesheet_slice(spritesheet, spritesheet_data, self.color, atlas)
-        atlas.set_current_animation('char_idle')
         self.add_child(self.sprite)
+
+        if animation is not None:
+            atlas.set_current_animation(animation)
+            atlas._current_sequence.speed = self._animation_speed
 
 
 class Player(Char):
@@ -30,64 +38,33 @@ class Player(Char):
     scored: Entity.Signal
     died: Entity.Signal
 
-    _velocity: array
-    _floor: float
+    was_collided: bool = False
+    death_sfx: Sound = None
+    limits: Shape
+    hand_item: type[Plant] = Rose
+    hand_items: list[type[Plant]] = [Rose, Violet]
     _start_position: tuple[int, int]
 
-    was_collided: bool = False
-    speed: float = 10.0
-
-    score_sfx: Sound = None
-    death_sfx: Sound = None
-
-    def _process(self, delta: float) -> None:
-        self.points += 1
-
-        if self.points % 500 == 0:
-            self.score_sfx.play()
-            self.scored.emit()
-
-        super()._process(delta)
-
     def _physics_process(self, delta: float) -> None:
-        position: list = [self.position[0], self.position[1]]
-
-        # Move
-        for i in range(2):
-            position[i] += self._velocity[i] * self.speed
-
-            if position[i] < 0.0:
-                position[i] = 0.0
-            elif position[i] > root.screen_size[i]:
-                position[i] = root.screen_size[i]
-
-        self.position = array(position)
-
-    def _run(self, x: float) -> float:
-        x += self._velocity[X] * self.speed
-
-        if x < 0.0:
-            x = 0.0
-        elif x > root.screen_size[X]:
-            x = root.screen_size[X]
-
-        return x
+        self.move_and_collide(self._velocity * self.speed)
+        super()._physics_process(delta)
 
     def _input(self) -> None:
         self._velocity = Input.get_input_strength()
+        super()._input()
 
-    def _on_Body_collided(self, body: KinematicBody) -> None:
-        global root, ENEMY_GROUP
-
-        if self.was_collided:
-            return
-
-        if root.is_on_group(body, ENEMY_GROUP):
-            root.pause_tree()
-            self.sprite.atlas.is_paused = True
-            self.death_sfx.play()
-            self.was_collided = True
-            self.died.emit()
+    # def _on_Body_collided(self, body: Body) -> None:
+    #     global root, ENEMY_GROUP
+    #
+    #     if self.was_collided:
+    #         return
+    #
+    #     if root.is_on_group(body, ENEMY_GROUP):
+    #         root.pause_tree()
+    #         self.sprite.atlas.is_paused = True
+    #         self.death_sfx.play()
+    #         self.was_collided = True
+    #         self.died.emit()
 
     def _on_Game_resumed(self) -> None:
         self.was_collided = False
@@ -102,31 +79,28 @@ class Player(Char):
     def get_points(self) -> None:
         return self._points
 
-    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 score_sfx: Sound, death_sfx: Sound, name: str = 'Char',
-                 coords: tuple[int, int] = VECTOR_ZERO, color: Color = Color('#6acd5bff')) -> None:
+    def __init__(self, limits: Shape, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 death_sfx: Sound, coords: tuple[int, int] = VECTOR_ZERO) -> None:
         global root, input, root, SPRITE_SIZE, SPRITES_SCALE, PLAYER_GROUP
         super().__init__(spritesheet, spritesheet_data,
-                         name=name, coords=coords, color=color)
+                         name='Char', coords=coords, color=Color('#6acd5bff'), animation='char_idle')
 
         # Set Sprite Group
         self.sprite.group = PLAYER_GROUP
-
         # Set Scene Tree Group
         root.add_to_group(self, PLAYER_GROUP)
 
-        self.score_sfx = score_sfx
         self.death_sfx = death_sfx
         self.scale = array(SPRITES_SCALE)
         self._points: int = 0
-
-        self._velocity = array([0.0, 0.0])
-        self._floor = self.position[Y]
         self._start_position = coords
+
+        self.limits = limits
 
         # TODO -> Shoot
         # input.register_event(self, KEYDOWN, K_SPACE, self.JUMP)
-        self.collided.connect(self, self, self._on_Body_collided)
+
+        #self.collided.connect(self, self, self._on_Body_collided)
 
         # Set the Shape
         shape: Shape = Shape()
@@ -147,143 +121,90 @@ class Player(Char):
     points: property = property(get_points, set_points)
 
 
-class Runner(KinematicBody):
-    speed: float = 1.0
-    notifier: VisibilityNotifier
+class Native(Char):
+    atk: int = 1
+    hp: int
+    final_target_pos: tuple[int, int]
+    move: Callable[[float], None]
+    _is_flipped: bool = False
 
     def _physics_process(self, delta: float) -> None:
-        global root
+        self.move(delta)
 
-        edge: int = self.sprite.get_cell()[X] * self.scale[X]
-        self.position[X] = (self.position[X] - int(self.speed) + edge) % \
-            (root._screen_width + edge * 2) - edge
+    def _follow(self, delta: float) -> None:
+        self._velocity = Steering.follow(Vector2(
+            *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
+        self.move_and_collide(self._velocity * self.speed)
+        super()._physics_process(delta)
 
-    def __init__(self, name: str = 'Runner', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = Color(46, 10, 115)) -> None:
-        super().__init__(name=name, coords=coords, color=color)
+    def _move(self, delta: float) -> None:
+        self._velocity = Steering.follow(Vector2(
+            *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
+        is_flipped: bool = self._velocity.x > 0.0
 
-        # Set the VisibilityNotifier
-        notifier: VisibilityNotifier = VisibilityNotifier()
-        self.notifier = notifier
-        self.add_child(notifier)
+        if self._is_flipped != is_flipped:
+            self.sprite.atlas.flip_h = is_flipped
+            self._is_flipped = is_flipped
 
+        self.move_and_collide(self._velocity * self.speed)
+        super()._physics_process(delta)
 
-class Cactus(Runner):
-    '''Objeto único de jogo. Objeto que pode colidir com o personagem protagonista.'''
-    sprite: Sprite
+    def set_target(self, value: Node) -> None:
+        self._current_target = value
+        self.move = self._move if value is None else self._follow
 
-    def __init__(self, spritesheet: Surface, name: str = 'Cactus', coords: tuple[int, int] = VECTOR_ZERO) -> None:
-        global root, SPRITES_SCALE, ENEMY_GROUP
-        super().__init__(name=name, coords=coords)
-        self.scale = array(SPRITES_SCALE)
+    def _on_Body_collided(self, body) -> None:
 
-        # Set the sprite
-        sprite: Sprite = Sprite()
-        sprite.atlas.add_spritesheet(spritesheet, coords=(
-            CELL_SIZE * 5, 0), sprite_size=CELL)
-        sprite.group = ENEMY_GROUP
-        root.add_to_group(self, ENEMY_GROUP)
-        self.sprite = sprite
-        self.add_child(sprite)
+        if body.name == 'Ship':
+            self.move = NONE_CALL
+            self.disconnect(self.collided, self)
 
-        # Set the shape
+    def __init__(self, final_target_pos: tuple[int, int], max_hp_range: tuple[int, int],
+                 spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 name: str = 'Native', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color('#f3ce52'), animation: str = None) -> None:
+        super().__init__(spritesheet, spritesheet_data, name=name,
+                         coords=coords, color=color, animation=animation)
+        self.hp = randint(*max_hp_range)
+        self.final_target_pos = final_target_pos
+        self.move = self._move
+        self._current_target: Node = None
+        
+        # Set `Shape` child
         shape: Shape = Shape()
-        rect: Rect = Rect(sprite.atlas.rect)
-        rect.size = rect.size - array([16, 8])
-        shape.rect = rect
-        self.add_child(shape, 1)
-        self.notifier.rect = Rect((0, 0), rect.size + array([6, 6]))
+        shape.set_rect(Rect(VECTOR_ZERO, self.sprite.atlas.base_size))
+        self.add_child(shape, 0)
+        
+        self.connect(self.collided, self, self._on_Body_collided)
+
+    current_target: Node = property(lambda self: self.target, set_target)
 
 
-class PteroDino(Runner):
-    sprite: Sprite
+class Hermiga(Native):
 
-    def _on_Game_pause_toggled(self, paused: bool = False) -> None:
-        self.sprite.atlas.is_paused = paused
-
-    def __init__(self, spritesheet: Surface, name: str = 'PteroDino',
-                 coords: tuple[int, int] = VECTOR_ZERO, color: Color = Color(46, 10, 115)) -> None:
-        super().__init__(name=name, coords=coords, color=color)
-        global root, SPRITES_SCALE, SPRITE_SIZE, ENEMY_GROUP
-
-        self.scale = array(SPRITES_SCALE)
-        self.notifier.rect = Rect((0, 0), (24, 20))
-
-        # Set the Sprite
-        sprite: Sprite = Sprite()
-        sprite.atlas.add_spritesheet(spritesheet, h_slice=2, coords=(
-            CELL_SIZE * 3, 0), sprite_size=array(SPRITE_SIZE))
-        sprite.group = ENEMY_GROUP
-        self.sprite = sprite
-        root.add_to_group(self, ENEMY_GROUP)
-        self.add_child(sprite)
-
-        # Set the Shape
-        shape: Shape = Shape()
-        rect: Rect = Rect(sprite.atlas.rect)
-        rect.size -= array([16, 16])
-        shape.rect = rect
-        self.add_child(shape, 1)
-
-        # Connect to events
-        root.connect(root.pause_toggled, self, self._on_Game_pause_toggled)
+    def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
+                 spritesheet_data: dict[str, list[dict]], name: str = 'Hermiga',
+                 coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 6)) -> None:
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
+                         coords=coords, color=Color('#f3ce52'), animation='hermiga_walk')
+        self.atk = 3
 
 
-class Spawner(Node):
-    '''Objeto único de jogo. Nó responsável pela aparição de obstáculos na tela.'''
-    current_speed: int
-    floor_coord: tuple[int, int]
-    spritesheet: Surface
+class Mosca(Native):
 
-    cactus: Cactus = None
-    pterodino: PteroDino = None
-    spawns: list[Node] = None
+    def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
+                 spritesheet_data: dict[str, list[dict]], name: str = 'Mosca',
+                 coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 5)) -> None:
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
+                         coords=coords, color=Color('#57b9f2'), animation='mosca_fly')
+        self.atk = 2
 
-    def _on_Game_resumed(self) -> None:
 
-        for child in self._children_index:
-            child.position[X] = self._SPAWN_POS
+class Lunar(Native):
 
-    def set_speed(self, value: float) -> None:
-        self.current_speed = value
-        self.cactus.speed = value
-        self.pterodino.speed = value
-
-    def speed_up(self) -> None:
-        self.set_speed(self.current_speed + 1)
-
-    def _on_Notifier_screen_exited(self, node: Node) -> None:
-        self.remove_child(node)
-        self.add_child(choice(self.spawns))
-
-    def _setup_spawn(self) -> None:
-        global root
-        notifier: VisibilityNotifier
-
-        self.cactus = Cactus(self.spritesheet, coords=(
-            self._SPAWN_POS, self.floor_coord + CELL_SIZE // 2))
-        notifier = self.cactus.notifier
-        notifier.connect(notifier.screen_exited, self,
-                         self._on_Notifier_screen_exited, self.cactus)
-
-        self.pterodino = PteroDino(self.spritesheet, coords=(
-            self._SPAWN_POS, root._screen_height // 2 + 100))
-        notifier = self.pterodino.notifier
-        notifier.connect(notifier.screen_exited, self,
-                         self._on_Notifier_screen_exited, self.pterodino)
-
-        self.spawns = [self.cactus, self.pterodino]
-        self.add_child(choice(self.spawns))
-
-    def __init__(self, floor_coord: tuple[int, int], spritesheet: Surface, name: str = 'Spawner',
-                 coords: tuple[int, int] = VECTOR_ZERO, speed: int = 1) -> None:
-        global root
-        super().__init__(name=name, coords=coords)
-
-        self.floor_coord = floor_coord
-        self.spritesheet = spritesheet
-        self._SPAWN_POS: int = root._screen_width + \
-            CELL_SIZE * SPRITES_SCALE[X]
-        self._setup_spawn()
-        self.anchor = array(BOTTOM_RIGHT)
-        self.set_speed(speed)
+    def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
+                 spritesheet_data: dict[str, list[dict]], name: str = 'Lunar',
+                 coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 4)) -> None:
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
+                         coords=coords, color=Color('#8e6b2b'), animation='lunar_dig')
+        self.atk = 1

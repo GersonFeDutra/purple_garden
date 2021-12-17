@@ -10,7 +10,6 @@ class TitleScreen(Node):
         KEY_DOWN_EVENT: str = 'key_down'
         ESCAPE_EVENT: str = 'escape'
 
-    spritesheet_old: Surface
     spritesheet: Surface
     spritesheet_data: dict[str, list[dict]]
     sound_fxs: dict[str, Sound]
@@ -32,6 +31,11 @@ class TitleScreen(Node):
     credits: Popup
     tuto: Popup
     current_focus: Popup = None
+
+    def _enter_tree(self) -> None:
+        super()._enter_tree()
+        # FIXME -> Verificar a necessidade dessa chamada.
+        self._on_Locale_changed(root._locale)
 
     def _input_event(self, event: InputEvent) -> None:
 
@@ -65,8 +69,8 @@ class TitleScreen(Node):
 
         root.clear_cached_locales()
         root.current_scene = GameWorld(
-            self.spritesheet_old, self.spritesheet,
-            self.spritesheet_data, self.sound_fxs, self.default_font, self.gui_font)
+            self.spritesheet, self.spritesheet_data, self.sound_fxs,
+            self.default_font, self.gui_font)
 
     def _on_Language_pressed(self) -> None:
         LOCALES: tuple[str] = 'pt', 'en'
@@ -122,12 +126,11 @@ class TitleScreen(Node):
             self.selected_button = button_id
             self.info_label.text = self.info[button_id]
 
-    def __init__(self, spritesheet_old: Surface, spritesheet: Surface,
-                 spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
-                 default_font: font.Font, gui_font: font.Font, title_font: font.Font,
-                 name: str = 'TitleScreen', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 sound_fxs: dict[str, Sound], default_font: font.Font, gui_font: font.Font,
+                 title_font: font.Font, name: str = 'TitleScreen',
+                 coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
-        self.spritesheet_old = spritesheet_old
         self.spritesheet = spritesheet
         self.spritesheet_data = spritesheet_data
         self.sound_fxs = sound_fxs

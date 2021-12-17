@@ -1,6 +1,43 @@
 from src.core.nodes import *
 
 
+class KeyItems(Grid):
+    '''Contêiner do tipo "grade" que apresenta e comanda uma lista de itens.'''
+    max_value: int = 0
+    
+    def add_child(self, node: Node, at: int = -1) -> None:
+        super().add_child(node, at=at)
+        self.max_value += 1
+    
+    def remove_child(self, node=None, at: int = -1) -> Node:
+        node: Node = super().remove_child(node=node, at=at)
+        self.max_value -= 1
+        
+        return node
+    
+    def set_value(self, value: int) -> None:
+        
+        if value > self.max_value:
+            return
+        
+        if value > self._value:
+            for child in self._children_index[self._value: value + 1]:
+                self.add_child(child)
+        else:
+            for child in self._children_index[value:]:
+                self.remove_child(child)
+        self._value = value
+    
+    def get_value(self) -> int:
+        return self._value
+    
+    def __init__(self, name: str = 'Grid', coords: tuple[int, int] = VECTOR_ZERO, rows: int = 1) -> None:
+        super().__init__(name=name, coords=coords, rows=rows)
+        self._value = 0
+    
+    value: property = property(get_value, set_value)
+
+
 class GameOverDisplay(Node):
     RESTART: str = 'restart'
     label: Label

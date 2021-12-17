@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Iterator, Match
+from functools import wraps
+from typing import Callable, Iterator, Match, Union
 
 import pygame
 from pygame import Color, Surface, Vector2
@@ -13,7 +14,7 @@ import warnings
 import webbrowser
 import pytweening as tween
 from enum import IntEnum
-from numpy import array
+from numpy import array, ndarray
 from numpy.linalg import norm
 from collections import deque
 
@@ -26,9 +27,40 @@ from .lib.utils import *
 IS_DEBUG_ENABLED: bool = '-t' in argv
 IS_DEV_MODE_ENABLED: bool = IS_DEBUG_ENABLED and '-d' in argv
 GIZMO_RADIUS: int = 2
+NONE_CALL: Callable[..., None] = lambda *args, **kwargs: None
 
 # Inicializa os módulos do PyGame
 pygame.init()
+
+
+def debug_call(cls: Callable, dbg_alt: Callable = None):
+    '''Decorador que faz o redirecionamento de uma chamada quando em modo de debug.'''
+
+    if IS_DEBUG_ENABLED:
+        return dbg_alt if dbg_alt else NONE_CALL
+    else:
+        return cls
+
+# Decorator
+def debug_method(dbg_alt: Callable = None):
+    '''Decorador que faz o redirecionamento de uma função quando em modo de debug.'''
+
+    if dbg_alt:
+        # Redireciona para o alternativo.
+        if IS_DEBUG_ENABLED:
+            return dbg_alt
+    else:
+        # Desabilita a função.
+        if not IS_DEBUG_ENABLED:
+            return NONE_CALL
+
+    # Retorna um invólucro para a função decorada.
+    def inner_function(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            return function(*args, **kwargs)
+        return wrapper
+    return inner_function
 
 
 class InputEvent:
@@ -47,8 +79,8 @@ class InputEvent:
 
 class Entity:
     '''Entidade básica do jogo, que contém informações de espaço (2D).'''
-    position: array
-    scale: array
+    position: ndarray
+    scale: ndarray
 
     class SignalNotExists(Exception):
         pass
@@ -84,6 +116,10 @@ class Entity:
 
         def disconnect(self, owner, observer) -> None:
             '''Desconecta o método pertencente ao nó indicado desse sinal.'''
+            if self._is_emiting:
+                self._cache_disconnections.append((owner, observer))
+                return
+
             if owner != self.owner:
                 raise Entity.Signal.NotOwner
 
@@ -95,14 +131,22 @@ class Entity:
             Os argumentos passados para as funções conectadas são, respectivamente:
             os argumentos passados ao conectar a função, em seguida,
             os argumentos passados na emissão.'''
+            self._is_emiting = True
 
             for observer, data in self._observers.items():
                 data[0](*(data[1] + args))
+
+            self._is_emiting = False
+            # Disconecta os sinais colocados na fila durante a emissão.
+            while self._cache_disconnections:
+                self.disconnect(*self._cache_disconnections.popleft())
 
         def __init__(self, owner, name: str) -> None:
             self.owner = owner
             self.name = name
             self._observers: dict[Entity, tuple[Callable, ]] = {}
+            self._is_emiting: bool = False
+            self._cache_disconnections: deque[tuple[Node, Node]] = deque()
 
     def _draw(self, target_pos: tuple[int, int] = None, target_scale: tuple[float, float] = None,
               offset: tuple[int, int] = None) -> None:
@@ -113,7 +157,7 @@ class Entity:
         if not self._draw_cell:
             return
 
-        cell: array = self.get_cell()
+        cell: ndarray = self.get_cell()
 
         if target_pos is None:
             target_pos = self.position
@@ -124,7 +168,7 @@ class Entity:
         target_pos = target_pos + array(self._layer.offset())
 
         # Desenha o Gizmo
-        extents: array = GIZMO_RADIUS * target_scale
+        extents: ndarray = GIZMO_RADIUS * target_scale
         draw.line(root.screen, self._color,
                   (target_pos[X] - extents[X], target_pos[Y]),
                   (target_pos[X] + extents[X], target_pos[Y]))
@@ -136,7 +180,7 @@ class Entity:
             # Desenha as bordas da caixa delimitadora
             extents = cell * target_scale
 
-            anchor: array = array(self.anchor)
+            anchor: ndarray = array(self.anchor)
             draw_bounds(root.screen, target_pos, extents, anchor,
                         self.color, fill=self._debug_fill_bounds)
 
@@ -174,7 +218,7 @@ class Entity:
     def get_anchor(self) -> tuple[int, int]:
         return tuple(self._anchor)
 
-    def __init__(self, coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def __init__(self, coords: tuple[int, int] = VECTOR_ZERO):
         self.position = array(coords)
         self.scale = array(VECTOR_ONE)
         self._anchor = array(CENTER)
@@ -279,21 +323,31 @@ class Node(Entity):
         '''Calcula a posição do nó, considerando a hierarquia
         (posições relativas aos nós ancestrais.'''
 
+        if self._is_on_tree:
+            return self._global_position
+
         if self._parent:
             return self._parent.get_global_position() + self.position
-        else:
-            return tuple(self.position)
+
+        return tuple(self.position)
 
     def get_global_scale(self) -> tuple[int, int]:
+        '''Calcula a escala do nó, considerando a hierarquia
+        (escalas coeficientes dos nós ancestrais.'''
+
+        if self._is_on_tree:
+            return self._global_scale
 
         if self._parent:
             return self._parent.get_global_scale() * self.scale
-        else:
-            return tuple(self.scale)
+
+        return tuple(self.scale)
 
     def _enter_tree(self) -> None:
         '''Método virtual que é chamado logo após o nó ser inserido a árvore.
         Chamado após este nó ou algum antecedente ser inserido como filho de outro nó na árvore.'''
+        self._global_position = self.get_global_position()
+        self._global_scale = self.get_global_scale()
         self._is_on_tree = True
         self._layer = self._parent._layer
 
@@ -317,27 +371,28 @@ class Node(Entity):
 
     def _input(self) -> None:
         '''Método virtual chamado no passo de captura de entradas dos nós.'''
-        pass
+        for child in self._children_index:
+            child._input()
 
     def _input_event(self, event: InputEvent) -> None:
         '''Método virtual chamado quando um determinado evento de entrada ocorrer.'''
         pass
 
-    def _propagate(self, delta_time: float, parent_offset: array = array(VECTOR_ZERO),
-                   parent_scale: array = array(VECTOR_ONE), tree_pause: int = 0):
+    def _propagate(self, delta_time: float, parent_offset: ndarray = array(VECTOR_ZERO),
+                   parent_scale: ndarray = array(VECTOR_ONE), tree_pause: int = 0):
         '''Propaga os métodos virtuais na hierarquia da árvore, da seguinte forma:
         Primeiro as entradas são tomadas e então os desenhos são renderizados na tela.
         Logo em seguida, após a propagação nos filhos, o método `_process` é executado.'''
         global root
 
-        target_scale: array = self.scale * parent_scale
-        target_pos: array = self.position + parent_offset
-        offset: array = self.get_cell() * target_scale * self.anchor
+        target_scale: ndarray = self.scale * parent_scale
+        target_pos: ndarray = self.position + parent_offset
+        offset: ndarray = self.get_cell() * target_scale * self.anchor
         physics_helper: PhysicsHelper = PhysicsHelper(self)
+        self._global_position = tuple(target_pos)
+        self._global_scale = tuple(target_scale)
 
-        self._input()
         self._draw(target_pos, target_scale, offset)
-
         tree_pause = tree_pause | root.tree_pause | self.pause_mode
         self._subpropagate(delta_time, target_pos, target_scale,
                            physics_helper.children, tree_pause)
@@ -350,7 +405,7 @@ class Node(Entity):
 
         return physics_helper.check_collisions()
 
-    def _subpropagate(self, delta_time: float, target_pos: array, target_scale: array,
+    def _subpropagate(self, delta_time: float, target_pos: ndarray, target_scale: ndarray,
                       physics_helpers: deque, tree_pause: int) -> None:
         '''Método auxiliar para propagar métodos virtuais nos nós filhos.'''
 
@@ -361,6 +416,9 @@ class Node(Entity):
     def _process(self, delta: float) -> None:
         '''Método virtual para processamento de dados em cada passo/ frame.'''
         pass
+
+    def __repr__(self) -> str:
+        return f'{self.name}: {type(self)}'
 
     def __init__(self, name: str = 'Node', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         global root
@@ -375,6 +433,8 @@ class Node(Entity):
         self._children_refs: dict[str, Node] = {}
         self._parent: Node = None
         self._current_groups: list[str] = []
+        self._global_position: tuple[int, int] = tuple(coords)
+        self._global_scale: tuple[float, float] = VECTOR_ONE
 
 
 class Camera(Node):
@@ -394,18 +454,19 @@ class Camera(Node):
         def __init__(self, target: Node) -> None:
             super().__init__()
             self.target = target
-            self.camera: Camera = None
+            self._camera: Camera = None
 
     class Follow(Scroll):
 
         def scroll(self, delta: float) -> None:
-            self.camera.raw_offset.xy = - \
+            self._camera.raw_offset.xy = \
                 array(self.target.get_global_position())
 
-            self.camera.raw_offset += self.target.get_cell() + \
-                (self.camera.get_cell() * array(self.camera.anchor) +
+            self._camera.raw_offset -= self.target.get_cell() + \
+                (self._camera.get_cell() * array(self._camera.anchor) +
                  self.target.get_cell() * array(self.target.anchor))
-            self.camera.position = array(self.camera.raw_offset, dtype=int)
+            self._camera.offset = int(self._camera.raw_offset.x), int(
+                self._camera.raw_offset.y)
 
         def __init__(self, target: Node) -> None:
             super().__init__(target)
@@ -415,14 +476,28 @@ class Camera(Node):
 
         def scroll(self, delta: float) -> None:
             super().scroll(delta)
-            self.camera.position = clamp(self.limit[X], self.camera.position[X], self.limit[W]), \
-                clamp(self.limit[Y], self.camera.position[Y], self.limit[H])
+            self._camera.offset = clamp(self.limit[X], self._camera.offset[X], self.limit[W]), \
+                clamp(self.limit[Y], self._camera.offset[Y], self.limit[H])
+            return
+
+        def set_camera(self, value) -> None:
+            self._camera = value
+
+            cell: tuple[int, int] = self._camera.get_cell(
+            ) * array(self._camera._global_scale)
+            # anchor: ndarray = array(self._camera.anchor)
+            xy: ndarray = self.limit[:2]
+            wh: ndarray = self.limit[2:] - cell
+            self.limit = xy[X], xy[Y], wh[X], wh[Y]
+            return
 
         def __init__(self, target: Node, limit: tuple[int, int, int, int]) -> None:
             super().__init__(target)
             self.limit = limit
 
-    # offset: tuple[int, int]
+        camera: property = property(lambda self: self._camera, set_camera)
+
+    offset: tuple[int, int]
     raw_offset: Vector2
     scroll: Scroll = None
 
@@ -457,7 +532,7 @@ class CanvasLayer(Node):
             child._enter_tree()
 
     def _get_camera_offset(self) -> None:
-        return self.active_camera.position
+        return -array(self.active_camera.offset)
 
     def set_active_camera(self, value: Camera) -> None:
         self._active_camera = value
@@ -476,7 +551,7 @@ class CanvasLayer(Node):
             CanvasLayer.NO_CAMERA_OFFSET
         self._active_camera: Camera = None
 
-    active_camera: property = property(get_active_camera, set_active_camera)
+    active_camera: Camera = property(get_active_camera, set_active_camera)
 
 
 class Input:
@@ -512,11 +587,11 @@ class Input:
 
         event_key.append(InputEvent(input_type, key, tag, to))
 
-    def get_input_strength() -> array:
+    def get_input_strength() -> ndarray:
         '''Método auxiliar para calcular um input axial.'''
         is_pressed = pygame.key.get_pressed()
         keys: dict = {K_w: 0.0, K_a: 0.0, K_s: 0.0, K_d: 0.0}
-        strength: array
+        strength: ndarray
 
         for key in keys:
             keys[key] = 1.0 if is_pressed[key] else 0.0
@@ -529,10 +604,12 @@ class Input:
 
         return strength
 
-    def _tick(self) -> None:
-        '''Passo de captura dos inputs, mapeando-os nos eventos e executando-os.'''
+    def _tick(self) -> bool:
+        '''Passo de captura dos inputs, mapeando-os nos eventos e executando-os.
+        Se alguma entrada tiver ocorrido retorna `true`, ou então `falso` caso ocioso.'''
+        input_events = pygame.event.get()
 
-        for event in pygame.event.get():
+        for event in input_events:
 
             if event.type == QUIT:
                 pygame.quit()
@@ -556,6 +633,8 @@ class Input:
             for event in event_type.get(event_code, ()):
                 node: Node = event.target
                 node._input_event(event)
+
+        return len(input_events) > 0
 
     def __new__(cls):
         # Torna a classe em uma Singleton
@@ -683,9 +762,9 @@ class Control(Node):
                  anchor: tuple[int, int] = TOP_LEFT) -> None:
         super().__init__(name=name, coords=coords)
         self.anchor = array(anchor)
-        self._size: array = array(VECTOR_ZERO)
+        self._size: ndarray = array(VECTOR_ZERO)
 
-    size: property(get_size, set_size)
+    size: tuple[int, int] = property(get_size, set_size)
 
 
 class Grid(Control):
@@ -701,9 +780,10 @@ class Grid(Control):
         self.update_container()
 
         # Updates the size
-        self.size = array(self.cell_space)
-        self.size[X] *= self.rows
-        self.size[Y] *= len(self._children_index) // self.rows
+        size: ndarray = array(self.cell_space)
+        size[X] *= self.rows
+        size[Y] *= len(self._children_index) // self.rows
+        self.size = size
 
     def remove_child(self, node=None, at: int = -1) -> Node:
         node: Node = super().remove_child(node=node, at=at)
@@ -712,7 +792,7 @@ class Grid(Control):
         return node
 
     def update_container(self) -> None:
-        current_pos: array = array(VECTOR_ZERO)
+        current_pos: ndarray = array(VECTOR_ZERO)
         counter: int = 0
 
         for child in self._children_index:
@@ -743,7 +823,7 @@ class Grid(Control):
         super().__init__(name=name, coords=coords, anchor=TOP_LEFT)
         self._rows: int = rows
 
-    rows: property = property(get_rows, set_rows)
+    rows: int = property(get_rows, set_rows)
 
 
 class HBox(Control):
@@ -754,7 +834,7 @@ class HBox(Control):
 
     def add_child(self, node: Node, at: int = -1) -> None:
         super().add_child(node, at=at)
-        new_offset: array = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
+        new_offset: ndarray = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
             self.padding[W], self.padding[H])) * self.anchor
 
         self._rect_offset = self._rect_offset[X] + new_offset[X], max(
@@ -800,7 +880,7 @@ class VBox(Control):
 
     def add_child(self, node: Node, at: int = -1) -> None:
         super().add_child(node, at=at)
-        new_offset: array = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
+        new_offset: ndarray = (array(node.get_cell()) + (self.padding[X], self.padding[Y]) + (
             self.padding[W], self.padding[H])) * self.anchor
 
         self.size = max(
@@ -862,11 +942,11 @@ class TextureSequence:
         for path in paths:
             self.textures.append(pygame.image.load(path))
 
-    def set_textures(self, value: list) -> None:
+    def set_textures(self, value: list[Surface]) -> None:
         self._textures = value
         self.frame = 0
 
-    def get_textures(self) -> list:
+    def get_textures(self) -> list[Surface]:
         return self._textures
 
     def get_frames(self) -> int:
@@ -879,16 +959,37 @@ class TextureSequence:
         self._textures: list[Surface] = []
         self.speed = speed
 
-    textures: property = property(get_textures, set_textures)
+    textures: list[Surface] = property(get_textures, set_textures)
 
 
 class BaseAtlas(sprite.Sprite):
     '''Classe do PyGame responsável por gerenciar sprites e suas texturas.'''
-    base_size: array
+    base_size: ndarray
+
+    def flip(self) -> None:
+        self._flip_h = not self._flip_h
+        self._flip()
+
+    def _flip(self) -> None:
+        if self._flip_h:
+            if self._texture_left is None:
+                self._texture_left = transform.flip(self.image, True, False)
+            self.image = self._texture_left
+        else:
+            self.image = self._texture_right
+
+    def set_flip(self, value: bool) -> None:
+        self._flip_h = value
+        self._flip()
 
     def __init__(self) -> None:
         super().__init__()
         self.base_size = array(VECTOR_ZERO)
+        self._texture_right: Surface = None
+        self._texture_left: Surface = None
+        self._flip_h: bool = False
+
+    flip_h: bool = property(lambda self: self._flip_h, set_flip)
 
 
 class Icon(BaseAtlas):
@@ -896,6 +997,11 @@ class Icon(BaseAtlas):
     requer manipulação externa da lista.'''
     textures: list[Surface]
     texture_id: int = 0
+    # REFACTOR -> Mover esses atributos para a sub-classe necessária
+    plant: Node = None
+    grow_progress: float = 0.0
+    is_planting: bool = False
+    is_occupied: bool = False
 
     @staticmethod
     def get_spritesheet(texture: Surface, h_slice: int = 1, v_slice: int = 1,
@@ -920,6 +1026,11 @@ class Icon(BaseAtlas):
         self.image: Surface = self.textures[id]
         self.rect = self.image.get_rect()
         self.base_size = array(self.image.get_size())
+        self._texture_right = self.image
+        self._texture_left = None
+
+        if self._flip_h:
+            self._flip()
 
     def __init__(self, textures: list[Surface]) -> None:
         super().__init__()
@@ -941,8 +1052,8 @@ class Atlas(BaseAtlas):
         if self._static or self.is_paused:
             return
 
-        self._current_time = (
-            self._current_time + self.sequence.speed) % self.sequence.get_frames()
+        self._current_time = (self._current_time +
+                              self.sequence.speed) % self.sequence.get_frames()
         self.sequence.frame = int(self._current_time)
         self.__update_frame()
 
@@ -957,6 +1068,11 @@ class Atlas(BaseAtlas):
         self.image: Surface = self.sequence.get_texture()
         self.rect = self.image.get_rect()
         self.base_size = array(self.image.get_size())
+        self._texture_right = self.image
+        self._texture_left = None
+
+        if self._flip_h:
+            self._flip()
 
     def add_texture(self, *paths: str) -> None:
         '''Adciona uma textura ao atlas.'''
@@ -986,7 +1102,7 @@ class Atlas(BaseAtlas):
         self.add_spritesheet(pygame.image.load(
             path), h_slice=h_slice, v_slice=v_slice, coords=coords, sprite_size=sprite_size)
 
-    def set_textures(self, value: list) -> None:
+    def set_textures(self, value: list[Surface]) -> None:
         self.sequence.textures = value
         self._static = self.sequence.get_frames() <= 1
         self._update_frame()
@@ -1010,8 +1126,8 @@ class Atlas(BaseAtlas):
         super().__init__()
         self.sequence = TextureSequence()
 
-    frame: property = property(get_frame, set_frame)
-    textures: property = property(get_textures, set_textures)
+    frame: int = property(get_frame, set_frame)
+    textures: list[Surface] = property(get_textures, set_textures)
 
 
 class AtlasBook(BaseAtlas):
@@ -1045,6 +1161,11 @@ class AtlasBook(BaseAtlas):
         self.image: Surface = self._current_sequence.get_texture()
         self.rect = self.image.get_rect()
         self.base_size = array(self.image.get_size())
+        self._texture_right = self.image
+        self._texture_left = None
+
+        if self._flip_h:
+            self._flip()
 
     def add_animation(self, name: str, texture: Surface, h_slice: int = 1, v_slice: int = 1,
                       coords: tuple[int, int] = VECTOR_ZERO, sprite_size: tuple[int, int] = None,
@@ -1097,7 +1218,7 @@ class AtlasBook(BaseAtlas):
         super().__init__()
         self.animations = {}
 
-    frame: property = property(get_frame, set_frame)
+    frame: int = property(get_frame, set_frame)
 
 
 class Sprite(Node):
@@ -1133,7 +1254,7 @@ class Sprite(Node):
             self.atlas.rect.topleft) + self._layer.offset(), self.atlas.rect.size))
         self.atlas.update()
 
-    def get_cell(self) -> array:
+    def get_cell(self) -> ndarray:
         return array(self.atlas.base_size)
 
     def __init__(self, name: str = 'Sprite', coords: tuple[int, int] = VECTOR_ZERO,
@@ -1150,27 +1271,9 @@ class Sprite(Node):
         self.group = root.DEFAULT_GROUP
 
 
-# TODO -> Make Parallax Background using Surfaces
-'''
-class ParallaxBackground(Node):
-    offset: array
-    distance: float = 1.0
-
-    def _process(self, delta: float) -> None:
-        self.offset[0] = self.offset[0] + self.distance
-
-    def _subpropagate(self, target_pos: array, target_scale: array, rect: pygame.Rect, children_data: list[dict]):
-        return super()._subpropagate(target_pos, target_scale, rect, children_data)
-
-    def __init__(self, name: str = 'Node', coords: tuple[int, int] = VECTOR_ZERO) -> None:
-        super().__init__(name=name, coords=coords)
-        self.offset = array([0.0, 0.0])
-'''
-
-
 class Shape(Node):
     '''Nó que representa uma forma usada em cálculos de colisão.
-    Deve ser adicionada como filha de um `KinematicBody`.'''
+    Deve ser adicionada como filha de um `Body`.'''
     rect_changed: Entity.Signal
 
     class CollisionType(IntEnum):
@@ -1185,7 +1288,7 @@ class Shape(Node):
         self._rect.size = self._base_size * target_scale
         self._rect.topleft = array(target_pos) - offset
 
-    def get_cell(self) -> array:
+    def get_cell(self) -> ndarray:
         return array(self._base_size)
 
     def set_rect(self, value: Rect) -> None:
@@ -1196,12 +1299,12 @@ class Shape(Node):
     def get_rect(self) -> Rect:
         return self._rect
 
-    def set_base_size(self, value: array) -> None:
+    def set_base_size(self, value: ndarray) -> None:
         self._base_size = value
         self._rect.size = self._base_size * self.scale
         self.rect_changed.emit(self)
 
-    def get_base_size(self) -> array:
+    def get_base_size(self) -> ndarray:
         return self._base_size
 
     def bounds(self) -> Rect:
@@ -1215,8 +1318,21 @@ class Shape(Node):
         self.rect_changed = Entity.Signal(self, 'rect_changed')
         self._debug_fill_bounds = True
 
-    rect: property = property(get_rect, set_rect)
-    base_size: property = property(get_base_size, set_base_size)
+    rect: Rect = property(get_rect, set_rect)
+    base_size: ndarray = property(get_base_size, set_base_size)
+
+
+class CircleShape(Shape):
+    radius: float = 1.0
+
+    def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float], offset: tuple[int, int]) -> None:
+        global root
+        super()._draw(target_pos, target_scale, offset)
+        draw.circle(root.screen, self.color, target_pos, self.radius)
+
+    def __init__(self, name: str = 'CircleShape', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+        self._debug_fill_bounds = False
 
 
 class VisibilityNotifier(Shape):
@@ -1270,19 +1386,16 @@ class TileMap(Node):
 
     def _enter_tree(self) -> None:
         super()._enter_tree()
-        self._global_scale = super().get_global_scale()
 
         if self.tiles:
-            self._update_tiles()
+            self._update_scaled_map()
 
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
               offset: tuple[int, int]) -> None:
         global root
         super()._draw(target_pos, target_scale, offset)
-        root.screen.blit(self._map_scaled, Rect(self._layer.offset(), self._map_scaled.get_size()))
-
-    def get_global_scale(self) -> tuple[int, int]:
-        return self._global_scale
+        root.screen.blit(self._map_scaled, Rect(
+            self._layer.offset(), self._map_scaled.get_size()))
 
     def get_cell(self) -> tuple[int, int]:
         return array(self.get_size()) * self.scale
@@ -1298,7 +1411,8 @@ class TileMap(Node):
                 self.grid.append([])
 
             self.width = len(self.grid)
-            self._map = Surface(array(self.get_size()) * self.get_tile_size(), SRCALPHA)
+            self._map = Surface(array(self.get_size()) *
+                                self.get_tile_size(), SRCALPHA)
 
         row_tiles: list[int] = self.grid[col]
         last_row: int = len(row_tiles) - 1
@@ -1314,7 +1428,8 @@ class TileMap(Node):
             if self.height < new_height:
                 self.height = new_height
 
-                self._map = Surface(array(self.get_size()) * self.get_tile_size(), SRCALPHA)
+                self._map = Surface(
+                    array(self.get_size()) * self.get_tile_size(), SRCALPHA)
 
         row_tiles[row] = len(self.tiles)
         self.tiles.append(tile)
@@ -1353,10 +1468,10 @@ class TileMap(Node):
 
         tile: Icon = self.tiles.pop(id)
         row_tiles[row] = None
-        
+
         if tile:
             tile_coord: tuple[int, int] = self._tile_size * (col, row)
-            
+
             for x in range(tile_coord[X], tile_coord[X] + self._tile_size[X]):
                 for y in range(tile_coord[Y], tile_coord[Y] + self._tile_size[Y]):
                     self._map.set_at((x, y), colors.TRANSPARENT)
@@ -1381,7 +1496,7 @@ class TileMap(Node):
 
             if self._is_on_tree:
                 tile.rect.topleft = self._tile_size * (col, row)
-                
+
                 self._map.blit(tile.image, tile.rect)
                 self._update_scaled_map()
         except IndexError:
@@ -1389,7 +1504,7 @@ class TileMap(Node):
 
     def set_tile_area(
             self, tile: Icon, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
-        id: int = tile.textures.index(tile.image)
+        id: int = tile.texture_id
 
         for i in range(from_col, to_col):
             for j in range(from_row, to_row):
@@ -1397,11 +1512,13 @@ class TileMap(Node):
                 new_tile.set_texture(id)
                 self.set_tile(new_tile, i, j)
 
+        self._update_tiles()
+
     def set_tile_size(self, value: tuple[int, int]) -> None:
         self._tile_size = array(value)
 
     def get_tile_size(self) -> tuple[int, int]:
-        return self._tile_size
+        return tuple(self._tile_size)
 
     def get_size(self) -> tuple[int, int]:
         return self.width, self.height
@@ -1419,11 +1536,12 @@ class TileMap(Node):
         for tile in self.tiles:
             tile.image.set_alpha()
             self._map.blit(tile.image, tile.rect)
-        
+
         self._update_scaled_map()
 
     def _update_scaled_map(self) -> None:
-        new_size: tuple[int, int] = array(self._map.get_size()) * self._global_scale
+        new_size: tuple[int, int] = array(
+            self._map.get_size()) * self._global_scale
         self._map_scaled = transform.scale(self._map, array(new_size, int))
 
     def __init__(self, tile_size: tuple[int, int], name: str = 'TileMap',
@@ -1432,10 +1550,9 @@ class TileMap(Node):
         self.tiles = []
         self.grid = []
         self.textures = []
-        self._tile_size: array = array(tile_size)
-        self._global_scale: array = array(self.scale)
+        self._tile_size: ndarray = array(tile_size)
 
-    tile_size: property = property(get_tile_size, set_tile_size)
+    tile_size: tuple[int, int] = property(get_tile_size, set_tile_size)
 
 
 class Panel(Control):
@@ -1445,7 +1562,7 @@ class Panel(Control):
     borders: Shape
     bg: Shape
 
-    def set_size(self, value: array) -> None:
+    def set_size(self, value: ndarray) -> None:
         super().set_size(value)
         value = array(value)
         self.borders.base_size = value
@@ -1455,7 +1572,7 @@ class Panel(Control):
                    ) + (self._borders[W], self._borders[H]))
         self.bg.base_size = self._inner_size
 
-    def get_size(self) -> array:
+    def get_size(self) -> ndarray:
         return self._size
 
     def set_anchor(self, value: tuple[int, int]) -> None:
@@ -1475,10 +1592,10 @@ class Panel(Control):
         self._borders: tuple[int, int, int, int] = borders
 
         # Determina o tamanho do retângulo interno (BackGround)
-        topleft: array = array((borders[X], borders[Y]))
-        base_size: array = size - (topleft + (borders[W], borders[H]))
-        self._inner_size: array = base_size
-        # offset: array = array(self.get_cell()) * - self.anchor
+        topleft: ndarray = array((borders[X], borders[Y]))
+        base_size: ndarray = size - (topleft + (borders[W], borders[H]))
+        self._inner_size: ndarray = base_size
+        # offset: ndarray = array(self.get_cell()) * - self.anchor
 
         # Set the border square
         bar: Shape = Shape(name='Borders')
@@ -1500,27 +1617,30 @@ class Panel(Control):
 
         self.set_anchor(anchor)
 
-    size: property = property(get_size, set_size)
+    size: ndarray = property(get_size, set_size)
 
 
 class ProgressBar(Panel):
     bar: Shape
 
-    def set_progress(self, value: float) -> None:
-        self._progress = value
-        self._update_progress(value)
-
-    def update_progress(self, value: float) -> None:
+    def _update_progress(self, value: float) -> None:
         '''Atualiza o tamanho da barra de progresso de forma ascendente.'''
         self.bar.base_size[self._grow_coord] = self._inner_size[self._grow_coord] * value
 
-    def update_progress_flip(self, value: float) -> None:
+    def _update_progress_flip(self, value: float) -> None:
         '''Atualiza o tamanho da barra de progresso de forma descendente.'''
         base_size: int = self._inner_size[self._grow_coord]
         length: int = base_size * value
 
         self.bar.position[self._grow_coord] = base_size - length
         self.bar.base_size[self._grow_coord] = self._inner_size[self._grow_coord] * value
+
+    def _filter_progress(self, value: float) -> float:
+        return clamp(0.0, value, 1.0)
+
+    def set_progress(self, value: float) -> None:
+        self._progress = value
+        self._progress_update(self._progress_filter(value))
 
     def get_progress(self) -> float:
         return self._progress
@@ -1529,7 +1649,7 @@ class ProgressBar(Panel):
                  bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
                  borders_color: Color = colors.RED, size: tuple[int, int] = (125, 25),
                  borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS,
-                 v_grow: bool = False, flip: bool = False) -> None:
+                 v_grow: bool = False, flip: bool = False, allow_overflow: bool = False) -> None:
         super().__init__(name=name, coords=coords, bg_color=bg_color,
                          borders_color=borders_color, size=size, borders=borders)
         self.color = bg_color
@@ -1537,8 +1657,12 @@ class ProgressBar(Panel):
 
         self._progress: float = .5
         self._grow_coord: int = int(v_grow)
-        self._update_progress: Callable = self.update_progress if (
-            flip ^ (not v_grow)) else self.update_progress_flip
+
+        self._progress_filter: Callable[[float], float] = \
+            (lambda f: f) if allow_overflow else self._filter_progress
+        self._progress_update: Callable[[float], None] = \
+            self._update_progress if (
+                flip ^ (not v_grow)) else self._update_progress_flip
 
         # Set the Inner Bar
         topleft: tuple[int, int] = borders[X], borders[Y]
@@ -1553,10 +1677,10 @@ class ProgressBar(Panel):
         # Updates the progress
         self.set_progress(self._progress)
 
-    progress: property = property(get_progress, set_progress)
+    progress: float = property(get_progress, set_progress)
 
 
-class KinematicBody(Node):
+class Body(Node):
     '''Nó com capacidades físicas (permite colisão).'''
     collided: Entity.Signal
 
@@ -1608,8 +1732,20 @@ class KinematicBody(Node):
 
         for a in self._active_shapes:
             for b in target._active_shapes:
-                if a.rect.colliderect(b.rect):
-                    return True
+
+                if not a.rect.colliderect(b.rect):
+                    continue
+
+                had_collided: bool = True
+                for collider, collision in ((a, b), (b, a)):
+                    if isinstance(collider, CircleShape) and \
+                            Vector2(collider.get_global_position()) \
+                            .distance_to(collision.get_global_position()) > collider.radius:
+                        had_collided = False
+                    else:
+                        return True
+
+                return had_collided
 
         return False
 
@@ -1632,7 +1768,7 @@ class KinematicBody(Node):
 
         return self._cached_bounds
 
-    def __init__(self, name: str = 'KinematicBody', coords: tuple[int, int] = VECTOR_ZERO,
+    def __init__(self, name: str = 'Body', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color(46, 10, 115)) -> None:
         super().__init__(name, coords=coords)
         self.color = color
@@ -1643,6 +1779,33 @@ class KinematicBody(Node):
 
         self._was_shapes_changed: False
         self._cached_bounds: Rect = None
+
+
+class KinematicBody(Body):
+    _was_collided: bool = False
+    _last_motion: tuple[float, float]
+    _cache_motion: Vector2
+
+    def _physics_process(self, delta: float) -> None:
+        # Move
+        motion: Vector2 = self._cache_motion * delta  # \
+        # * (1 - int(self._was_collided) * 2)  # Velocity * Direction
+        # (Inverte a direção se colidir)
+        self.position += array(motion, int)
+        # self._was_collided = False
+        self._last_motion = tuple(motion)
+        self._cache_motion -= motion
+
+    def move_and_collide(self, velocity: Vector2) -> None:
+        self._cache_motion += velocity
+
+    def __init__(self, name: str = 'KinematicBody', coords: tuple[int, int] = VECTOR_ZERO, color: Color = Color(46, 10, 115)) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+        self._last_motion = VECTOR_ZERO
+        self._cache_motion = Vector2(self._last_motion)
+
+        # TODO -> Physics collision
+        # self.connect(self.collided, self, self)
 
 
 class Popup(Panel):
@@ -1752,7 +1915,7 @@ class Label(Node):
         self._text = value
         self._surface = self.update_surface
 
-    def get_text(self) -> None:
+    def get_text(self) -> str:
         return self._text
 
     def get_surface(self) -> Surface:
@@ -1791,7 +1954,7 @@ class Label(Node):
         self._text: str
         self.set_text(text)
 
-    text: property = property(get_text, set_text)
+    text: str = property(get_text, set_text)
 
 
 class Text(Control):
@@ -1930,7 +2093,7 @@ class BaseButton(Control):
         '''Método virtual chamado enquanto o botão está sendo pressionado'''
 
     def _update_rect(self) -> None:
-        area: array = array(self.get_cell()) * self.scale
+        area: ndarray = array(self.get_cell()) * self.scale
         self._rect.topleft = self.position - area * self.anchor
         self._rect.size = area
 
@@ -1984,7 +2147,7 @@ class BaseButton(Control):
             self, MOUSEBUTTONUP, Input.Mouse.LEFT_CLICK, BaseButton.RELEASE_EVENT)
         self._update_rect()
 
-    is_on_focus: property = property(get_is_on_focus, set_is_on_focus)
+    is_on_focus: bool = property(get_is_on_focus, set_is_on_focus)
 
 
 class Link(BaseButton):
@@ -2026,7 +2189,7 @@ class Link(BaseButton):
         else:
             self._do_action = lambda: None
 
-    def get_action(self) -> None:
+    def get_action(self) -> str:
         return self._action
 
     def __init__(self, font: font.Font, name: str = 'Link', coords: tuple[int, int] = VECTOR_ZERO,
@@ -2039,7 +2202,7 @@ class Link(BaseButton):
         self._action: str
         self.set_action(action)
 
-    action: property = property(get_action, set_action)
+    action: str = property(get_action, set_action)
 
 
 class TextureButton(BaseButton):
@@ -2311,7 +2474,6 @@ class PhysicsHelper():
     _container_type: int = 0
     rect: Rect = None
     head: Node
-    children = None
 
     class ContainerTypes(IntEnum):
         '''Enum para classificação dos nós entre contêineres ou corpos.'''
@@ -2328,7 +2490,7 @@ class PhysicsHelper():
         '''Verifica as colisões entre nós colisores. Retorna um auxiliar para permitir a construção
         de contêineres delimitadores em formato de árvore.'''
         is_solid: bool = isinstance(
-            self.head, KinematicBody) and self.head.has_shape()
+            self.head, Body) and self.head.has_shape()
         self._container_type = int(is_solid)
 
         content: list = []  # Estrutura auxiliar para indexar os elementos posteriormente
@@ -2435,11 +2597,12 @@ class PhysicsHelper():
                 is_all_leaf = False
 
             if is_all_leaf:
-                node_a: KinematicBody = a.head
-                node_b: KinematicBody = b.head
+                node_a: Body = a.head
+                node_b: Body = b.head
 
                 # Quando houver colisão nas folhas, o sinal `collided` é emitido para cada colisor.
                 if node_a.is_colliding(node_b):
+                    # TODO -> Colisões unilaterais (collider & collision) + (layers & masks)
                     node_a.collided.emit(node_b)
                     node_b.collided.emit(node_a)
 
@@ -2486,6 +2649,7 @@ class SceneTree(CanvasLayer):
     FOCUS_ACTION_DOWN: str = 'focus_action_down'
     FOCUS_ACTION_UP: str = 'focus_action_up'
     _current_focus: BaseButton = None
+    delta_persec: float = 0.0
 
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
@@ -2513,6 +2677,7 @@ class SceneTree(CanvasLayer):
             # tick = self.clock.tick(self.fixed_fps)
             self.clock.tick(self.fixed_fps)
             delta: float = self.clock.get_fps() / self.fixed_fps
+            self.delta_persec = delta / self.fixed_fps
             # print(self.clock.get_fps() / self.fixed_fps)
             # print(tick / self.fixed_fps)
             # print(tick / max(0.0001, self.clock.get_fps()))
@@ -2520,8 +2685,9 @@ class SceneTree(CanvasLayer):
             self.screen.fill(self.screen_color)
             # Preenche a tela
 
-            input._tick()
             # Propaga as entradas
+            if input._tick():
+                self._input()
 
             # Processa os tweens ativos na lista
             for tween in self._active_tweens:
@@ -2529,7 +2695,7 @@ class SceneTree(CanvasLayer):
 
             self._propagate(delta)
             # Propaga o processamento
-            # `Sprites` e `Labels`` aplicam blit individualmente no método `_draw``
+            # `Sprites` e `Labels` aplicam blit individualmente no método `_draw`
 
             pygame.display.update()
 
@@ -2584,8 +2750,9 @@ class SceneTree(CanvasLayer):
         node._set_is_on_focus(True)
         self._current_focus = node
 
-    def get_fps(self) -> float:
-        return self.clock.get_fps()
+    def get_delta_time(self) -> float:
+        '''Calculates and returns the current delta time-step.'''
+        return self.clock.get_fps() / self.fixed_fps
 
     def set_load_method(self, method: Callable[[str, str], dict[str, ]], dir: str) -> None:
         self._locale_load_method = method
@@ -2671,8 +2838,79 @@ class SceneTree(CanvasLayer):
             input.register_event(self, KEYDOWN, key, SceneTree.FOCUS_ACTION_UP)
             input.register_event(self, KEYUP, key, SceneTree.FOCUS_ACTION_DOWN)
 
-    screen_size: property = property(get_screen_size, set_screen_size)
-    current_scene: property = property(get_current_scene, set_current_scene)
+    # FIXME
+    @debug_method
+    def _get_tree(self) -> dict[str, Union[Node, list[Node]]]:
+
+        def get_child(node: Node) -> Node:
+            f_child = node._children_index[:1]
+
+            if f_child:
+                return f_child[0]
+            return None
+
+        # pointers
+        tree: dict[str, Union[Node, list[dict]]] = {
+            'root': self,
+            'children': []
+        }
+        next: dict[str, Union[dict, list[Node]]]
+        child = get_child(self)
+
+        if child:
+            next = {
+                'root': child,
+                'children': [],
+            }
+            tree['children'].append(next)
+        else:
+            return tree
+
+        parent: dict[str, Union[dict, list[Node]]] = tree
+        # stacks
+        previous_parent: list[dict] = [parent]
+        previous_siblings: list[list[Node]] = []
+
+        while next:
+            root: Node = next['root']
+            child = get_child(root)
+            cache: dict = next
+            next = None
+
+            if child:
+                next = {
+                    'root': child,
+                    'children': [],
+                }
+                cache['children'].append(next)
+                parent = cache
+                previous_parent.append(parent)
+                previous_siblings.append(root._children_index[1:])
+
+            else:
+                while previous_siblings:
+                    siblings: list[Node] = previous_siblings.pop()
+
+                    if siblings:
+                        sibling: Node = siblings.pop()
+                        next = {
+                            'root': sibling,
+                            'children': [get_child(sibling)],
+                        }
+                        cache = {
+                            'root': sibling,
+                            'children': [next],
+                        }
+                        parent['children'].append(cache)
+                        previous_siblings.append(siblings)
+                        break
+
+                    parent = previous_parent.pop()
+
+        return tree
+
+    screen_size: tuple[int, int] = property(get_screen_size, set_screen_size)
+    current_scene: Node = property(get_current_scene, set_current_scene)
 
 
 # Singletons
