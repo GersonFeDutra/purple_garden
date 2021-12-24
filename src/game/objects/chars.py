@@ -1,9 +1,9 @@
 from pygame.mixer import Sound
-from random import choice, randint
+from random import randint
 from src.core.nodes import *
 from ..consts import *
 from ..utils import Steering, spritesheet_slice
-from .ground import Plant, Rose, Violet
+from .plants import Plant, Rose, Violet
 
 
 class Char(KinematicBody):
@@ -46,6 +46,7 @@ class Player(Char):
     _start_position: tuple[int, int]
 
     def _physics_process(self, delta: float) -> None:
+        self.sprite.atlas.set_flip(int(self._velocity[X] < 0))
         self.move_and_collide(self._velocity * self.speed)
         super()._physics_process(delta)
 

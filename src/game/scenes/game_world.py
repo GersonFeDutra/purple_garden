@@ -1,4 +1,3 @@
-from typing import Optional
 from numpy import ceil
 from src.core.nodes import *
 from ..consts import *
@@ -92,8 +91,8 @@ class Level(Node):
     elapsed_time: float = 0.0
     wave_trigger: float = .3  # %
     wave_percent: float = 0.  # %
-    wave_length: float = 60.0 if IS_DEBUG_ENABLED else 600.0
-    spawn_frequency: float = 3.0 if IS_DEBUG_ENABLED else 10.0
+    wave_length: float = 600.0
+    spawn_frequency: float = 10.0
     center: tuple[int, int]
 
     gui: GUI
@@ -104,6 +103,10 @@ class Level(Node):
     spritesheet: Surface
     spritesheet_data: dict[str, list[dict]]
     natives: list[type[Native]] = [Hermiga, Mosca, Lunar]
+
+    if IS_DEBUG_ENABLED:
+        wave_length /= 10.
+        spawn_frequency = 3.
 
     def _process(self, delta: float) -> None:
         self.elapsed_time += delta / root.fixed_fps
@@ -126,6 +129,17 @@ class Level(Node):
         super()._enter_tree()
         self.bg.spawn_object(self.ship, self.bg.map_size // 2 - (2, 1))
 
+        bg: GroundGrid = self.bg
+        ship_pos: tuple[int, int] = self.ship.get_global_position()
+        ship: Sprite = self.ship.sprite
+        from_tile: ndarray = bg.world_to_map(*ship_pos)
+        to_tile: ndarray = bg.world_to_map(
+            *(ship_pos + array(ship.get_cell()) * ship.get_global_scale())) + array(VECTOR_ONE, int)
+
+        for i in range(from_tile[X], to_tile[X]):
+            for j in range(from_tile[Y], to_tile[Y]):
+                bg.disable_tile(i, j)
+
     def spawn_native(self, offset: tuple[int, int] = (-1, -1)) -> None:
         spawn: Native = self.natives[randint(0, self.wave_n % 3)](
             self.center, spritesheet=self.spritesheet,
@@ -143,7 +157,7 @@ class Level(Node):
         self.spritesheet_data = spritesheet_data
         self._spawn_native: Callable[[tuple[int, int]], None] = \
             lambda self: self.spawn_native(array(self.bg.map_size) // 3) \
-                if IS_DEBUG_ENABLED else self.spawn_native
+            if IS_DEBUG_ENABLED else self.spawn_native
 
         # Level Setup
         center: ndarray = array(size) // 2

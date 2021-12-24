@@ -44,22 +44,22 @@ def debug_call(cls: Callable, dbg_alt: Callable = None):
 # Decorator
 def debug_method(dbg_alt: Callable = None):
     '''Decorador que faz o redirecionamento de uma função quando em modo de debug.'''
-
-    if dbg_alt:
-        # Redireciona para o alternativo.
-        if IS_DEBUG_ENABLED:
-            return dbg_alt
-    else:
-        # Desabilita a função.
-        if not IS_DEBUG_ENABLED:
-            return NONE_CALL
-
-    # Retorna um invólucro para a função decorada.
     def inner_function(function):
-        @wraps(function)
-        def wrapper(*args, **kwargs):
-            return function(*args, **kwargs)
-        return wrapper
+        if dbg_alt:
+            # Redireciona para o alternativo.
+            if IS_DEBUG_ENABLED:
+                return dbg_alt
+        else:
+            # Desabilita a função.
+            if not IS_DEBUG_ENABLED:
+                return NONE_CALL
+
+        # Retorna um invólucro para a função decorada.
+        # @wraps(function)
+        # def wrapper(*args, **kwargs):
+        #     return function(*args, **kwargs)
+        # return wrapper
+        return function
     return inner_function
 
 
@@ -147,6 +147,24 @@ class Entity:
             self._observers: dict[Entity, tuple[Callable, ]] = {}
             self._is_emiting: bool = False
             self._cache_disconnections: deque[tuple[Node, Node]] = deque()
+
+    # Decorador
+    def debug(dbg_alt: Callable = None):
+        '''Decorador que habilita ou substitui uma função da classe quando em modo de debug.
+        Observe que se a função alternativa não for passada, a função será desabilitada
+        **quando o modo de debug estiver desabilitado.**'''
+        def inner_function(function):
+            if dbg_alt:
+                # Redireciona para o alternativo.
+                if IS_DEBUG_ENABLED:
+                    return dbg_alt
+            else:
+                # Desabilita a função.
+                if not IS_DEBUG_ENABLED:
+                    return NONE_CALL
+            return function
+
+        return inner_function
 
     def _draw(self, target_pos: tuple[int, int] = None, target_scale: tuple[float, float] = None,
               offset: tuple[int, int] = None) -> None:
@@ -1395,7 +1413,20 @@ class TileMap(Node):
         global root
         super()._draw(target_pos, target_scale, offset)
         root.screen.blit(self._map_scaled, Rect(
-            self._layer.offset(), self._map_scaled.get_size()))
+            self._layer.offset(), self._map_scaled.get_size())) 
+
+    def screen_to_map(self, x: int, y: int) -> tuple[int, int]:
+        '''Converte uma posição na tela em um ponto do mapa.'''
+        tile_size: ndarray = array(self.tile_size) * self._global_scale
+
+        return array(((x, y) + (
+            array(self._global_position) - self._layer.offset())) // tile_size, int)
+
+    def world_to_map(self, x: int, y: int) -> tuple[int, int]:
+        '''Converte uma posição global em um ponto do mapa.'''
+        tile_size: ndarray = array(self.tile_size) * self._global_scale
+        
+        return array((array((x, y)) - self._global_position) // tile_size, int)
 
     def get_cell(self) -> tuple[int, int]:
         return array(self.get_size()) * self.scale

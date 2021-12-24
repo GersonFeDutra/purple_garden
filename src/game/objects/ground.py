@@ -1,7 +1,8 @@
 from random import randint
 from src.core.nodes import *
-# from ..consts import CELL, CELL_SIZE, SPRITES_SCALE
-from ..utils import get_icon_sequence_slice, spritesheet_slice
+from ..utils import get_icon_sequence_slice
+from .chars import Player
+from .plants import Plant, OxTree
 
 
 class TemporaryBar(ProgressBar):
@@ -21,98 +22,13 @@ class TemporaryBar(ProgressBar):
         self._elapsed_time = 0.0
         self.finished = Node.Signal(self, 'finished')
 
-
-class Plant(Sprite):
-    animation_idle: str
-    animation_attack: str
-    view_range: Body
-    animations: AtlasBook
-
-    _grow_stages: int = 3
-    _current_stage: int = 0
-    _grow_progress: float = 0.0
-    _animation_speed: float = 0.1
-    _stage_triggers: list[float] = None
-    grow: Callable
-    
-    def _process(self, delta: float) -> None:
-        self.grow()
-
-    def _grow(self) -> None:
-        self._grow_progress += root.delta_persec
-        
-        if self._grow_progress > self._stage_triggers[self._current_stage]:
-            self._current_stage += 1
-            atlas: Icon = self.atlas
-            atlas.set_texture(self._current_stage)
-            
-            if self._current_stage >= self._grow_progress:
-                self._grow_up()
-                self.grow = NONE_CALL
-
-    def _grow_up(self) -> None:
-        self.atlas = self.animations
-
-        if self.animation_idle is not None:
-            self.atlas.set_current_animation(self.animation_idle)
-            self.atlas._current_sequence.speed = self._animation_speed
-
-    def __init__(self, color: Color, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 name: str = 'Plant', coords: tuple[int, int] = VECTOR_ZERO,
-                 atlas: BaseAtlas = None, animation_idle: str = None, animation_atk: str = None,
-                 from_slice: int = 0) -> None:
-        atlas: Icon = Icon(get_icon_sequence_slice(
-            spritesheet, spritesheet_data, color, from_slice=from_slice))
-        super().__init__(name=name, coords=coords, atlas=atlas)
-        self.anchor = array(TOP_LEFT)
-        self.grow = self._grow
-        self.color = color
-        self.animation_idle = animation_idle
-        self.animation_attack = animation_atk
-        self.animations = AtlasBook()
-        spritesheet_slice(spritesheet, spritesheet_data,
-                          self.color, self.animations)
-
-        self.view_range = Body('View')
-        self.add_child(self.view_range)
-
-
-class Rose(Plant):
-
-    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 name: str = 'Rose', coords: tuple[int, int] = VECTOR_ZERO,
-                 atlas: BaseAtlas = None) -> None:
-        super().__init__(Color('#fe5b59'), spritesheet, spritesheet_data, name=name, coords=coords,
-                         atlas=atlas, animation_idle='rose_idle', animation_atk='rose_attack')
-        self._stage_triggers = [10.0, 20.0, 30.0]
-
-
-class Violet(Plant):
-
-    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 name: str = 'Violet', coords: tuple[int, int] = VECTOR_ZERO,
-                 atlas: BaseAtlas = None) -> None:
-        super().__init__(Color('#d186df'), spritesheet, spritesheet_data, name=name, coords=coords,
-                         atlas=atlas, animation_idle='violet_idle', animation_atk='violet_attack')
-        self._stage_triggers = [15.0, 30.0, 45.0]
-
-
-class OxTree(Sprite):
-
-    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]], name: str = 'OxTree',
-                 coords: tuple[int, int] = VECTOR_ZERO) -> None:
-        super().__init__(name=name, coords=coords, atlas=Icon(get_icon_sequence_slice(
-            spritesheet, spritesheet_data, Color('#159a42'))))
-        self.anchor = array(TOP_LEFT)
-
-
-class GroundGrid(TileMap):
+class GroundGrid(TileMap): 
     HOLD_EVENT: str = 'hold'
     RELEASE_EVENT: str = 'release'
 
     map_size: tuple[int, int]
     marker: Sprite
-    gardener: Node
+    gardener: Player
     spritesheet: Surface
     spritesheet_data: dict[str, list[dict]]
 
@@ -179,12 +95,13 @@ class GroundGrid(TileMap):
         else:
             self._is_on_hold = False
 
-    def screen_to_map(self, x, y) -> tuple[int, int]:
-        '''Converte uma posição na tela em um ponto do mapa.'''
-        tile_size: ndarray = array(self.tile_size) * self._global_scale
-
-        return array(((x, y) + (
-            array(self._global_position) - self._layer.offset())) // tile_size, int)
+    def disable_tile(self, x: int, y: int) -> None:
+        tile: Icon = self.get_tile(x, y)
+        
+        if tile is None:
+            return
+        
+        tile.is_occupied = True
 
     def _display_loading_bar(self, coords: tuple[int, int], value: float) -> None:
         bar: TemporaryBar = self._active_bars.get(coords)
@@ -239,7 +156,7 @@ class GroundGrid(TileMap):
             return (side_flipper * self.map_size[X]) + offset[X] - 2 * offset[X] * side_flipper, randint(offset[Y], self.map_size[Y] - offset[Y] - 1)
 
     def __init__(self, map_size: tuple[int, int], tile_size: tuple[int, int], scale: tuple[int, int],
-                 spritesheet: Surface, spritesheet_data: dict[str, list[dict]], gardener: Node,
+                 spritesheet: Surface, spritesheet_data: dict[str, list[dict]], gardener: Player,
                  name: str = 'GroundGrid', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(tile_size, name=name, coords=coords)
         self._active_bars = {}
