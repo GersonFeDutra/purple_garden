@@ -22,7 +22,17 @@ class TemporaryBar(ProgressBar):
         self._elapsed_time = 0.0
         self.finished = Node.Signal(self, 'finished')
 
-class GroundGrid(TileMap): 
+
+class Tile(Icon):
+    '''Um ícone que contém informações relevantes na jogabilidade. Usado como uma célula do mapa.'''
+    is_planting: bool = False
+    is_occupied: bool = False
+    grow_progress: float = 0.0
+    plant: Plant = None
+
+
+class GroundGrid(TileMap):
+    _Tile: type[Tile] = Tile
     HOLD_EVENT: str = 'hold'
     RELEASE_EVENT: str = 'release'
 
@@ -32,9 +42,9 @@ class GroundGrid(TileMap):
     spritesheet: Surface
     spritesheet_data: dict[str, list[dict]]
 
-    _plants: int = 0 # Plantas spawnadas
+    _plants: int = 0  # Plantas spawnadas
     _selected_tile_coords: tuple[int, int] = None
-    _selected_tile: Icon = None
+    _selected_tile: Tile = None
     _is_on_hold: bool = False
     _active_bars: dict[tuple[int, int], TemporaryBar]
 
@@ -46,25 +56,28 @@ class GroundGrid(TileMap):
 
     def _process(self, delta: float) -> None:
         tile_coords: tuple[int, int] = self.screen_to_map(*mouse.get_pos())
-        self.marker.position = tile_coords * self.tile_size * self._global_scale        
-        self.marker.atlas.set_texture(int(self.get_tile(*tile_coords).is_occupied))
-        tile: Icon = self._selected_tile
+        self.marker.position = tile_coords * self.tile_size * self._global_scale
+        self.marker.atlas.set_texture(
+            int(self.get_tile(*tile_coords).is_occupied))
+        tile: Tile = self._selected_tile
 
         if not self._is_on_hold:
             return
 
         if self.gardener.hand_item is not None and \
                 (self._selected_tile_coords == tile_coords).all():
-            
+
             if self._selected_tile.is_occupied:
                 pass
-                    # Harvest
+                # Harvest
             else:
                 tile.grow_progress += delta / root.fixed_fps
-                self._display_loading_bar(tuple(tile_coords), tile.grow_progress)
+                self._display_loading_bar(
+                    tuple(tile_coords), tile.grow_progress)
 
                 if self._selected_tile.grow_progress >= 1.0:
-                    tile.plant = self.spawn_plant(self.gardener.hand_item, tile_coords)
+                    tile.plant = self.spawn_plant(
+                        self.gardener.hand_item, tile_coords)
                     tile.is_occupied = True
                     self._is_on_hold = False
                     tile.grow_progress = 1.
@@ -79,16 +92,20 @@ class GroundGrid(TileMap):
             if self.gardener.hand_item is None:
                 # TODO -> Harvest
                 return
-            
-            coords: tuple[int, int] = self.screen_to_map(*mouse.get_pos())
-            tile: Icon = self.get_tile(*coords)
 
+            coords: tuple[int, int] = self.screen_to_map(*mouse.get_pos())
+            tile: Tile = self.get_tile(*coords)
 
             if tile:
                 if tile.is_occupied:
                     # TODO -> Harvest
                     return
+                
+                if self._selected_tile != tile and self._selected_tile is not None:
+                    # Caso outro tile seja selecionado, zera o anterior.
+                    self._selected_tile.grow_progress = 0.0
 
+                # Seleciona um novo tile.
                 self._selected_tile_coords = coords
                 self._selected_tile = tile
                 self._is_on_hold = True
@@ -96,11 +113,11 @@ class GroundGrid(TileMap):
             self._is_on_hold = False
 
     def disable_tile(self, x: int, y: int) -> None:
-        tile: Icon = self.get_tile(x, y)
-        
+        tile: Tile = self.get_tile(x, y)
+
         if tile is None:
             return
-        
+
         tile.is_occupied = True
 
     def _display_loading_bar(self, coords: tuple[int, int], value: float) -> None:
@@ -121,11 +138,11 @@ class GroundGrid(TileMap):
         self._active_bars.pop(at)
 
     def set_tile_area(
-            self, tile: Icon, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
+            self, tile: Tile, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
 
         for i in range(from_col, to_col):
             for j in range(from_row, to_row):
-                new_tile: Icon = Icon(tile.textures)
+                new_tile: Tile = Tile(tile.textures)
                 # Randomiza o terreno
                 new_tile.set_texture(randint(0, len(tile.textures) - 1))
                 self.set_tile(new_tile, i, j)
@@ -167,7 +184,7 @@ class GroundGrid(TileMap):
         self.spritesheet_data = spritesheet_data
         self.map_size = map_size
 
-        ground: Icon = Icon(get_icon_sequence_slice(
+        ground: Tile = Tile(get_icon_sequence_slice(
             spritesheet, spritesheet_data, self.color))
         ground.set_texture(0)
 
@@ -176,7 +193,7 @@ class GroundGrid(TileMap):
         self.set_tile_id(0, 0, 1)
 
         # Selection
-        marker_icon: Icon = Icon(get_icon_sequence_slice(
+        marker_icon: Tile = Tile(get_icon_sequence_slice(
             spritesheet, spritesheet_data, Color('#bde5a5')))
         marker_icon.set_texture(0)
         marker: Sprite = Sprite('Marker', atlas=marker_icon)

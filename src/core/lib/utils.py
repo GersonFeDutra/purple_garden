@@ -2,11 +2,19 @@ from pygame import draw
 from pygame import Surface
 from pygame import Color
 from numpy import ndarray
+
+import typing
+from typing import Generic
+from warnings import warn as push_warning
 from .vectors import X, Y
 
-'''Global Helper "Static" Methods'''
+
+T = typing.TypeVar('T') # TypeVar usado na metaclasse `Generic`.
+# Ao definir o sub-tipo da classe genérica, usando a sintaxe de tipagem `[T]`,
+# a IDE responderá aquele tipo associado.
 
 
+# Global Helper "Static" Methods
 def lerp(_from_: float, _to_: float, _delta_: float) -> float:
     '''Realiza uma interpolação linear de `_from_` para `_to_` em termos de `_delta_`.'''
     return (_from_ - _to_) * _delta_

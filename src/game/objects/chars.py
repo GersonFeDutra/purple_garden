@@ -16,6 +16,8 @@ class Char(KinematicBody):
                  name: str = 'Char', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color('#0d89c6'), animation: str = None) -> None:
         super().__init__(name=name, coords=coords, color=color)
+        # Desabilita as máscaras de colisão por padrão (apenas recebe colisão).
+        self.collision_mask = 0
         self._velocity = Vector2(*VECTOR_ZERO)
 
         # Set the Sprite
@@ -85,6 +87,8 @@ class Player(Char):
         global root, input, root, SPRITE_SIZE, SPRITES_SCALE, PLAYER_GROUP
         super().__init__(spritesheet, spritesheet_data,
                          name='Char', coords=coords, color=Color('#6acd5bff'), animation='char_idle')
+        # TODO -> Fazer a colisão do jogador com o mundo
+        self.collision_layer = 0
 
         # Set Sprite Group
         self.sprite.group = PLAYER_GROUP
@@ -166,16 +170,17 @@ class Native(Char):
                  color: Color = Color('#f3ce52'), animation: str = None) -> None:
         super().__init__(spritesheet, spritesheet_data, name=name,
                          coords=coords, color=color, animation=animation)
+        self.collision_layer = PhysicsLayers.NATIVES_BODIES
         self.hp = randint(*max_hp_range)
         self.final_target_pos = final_target_pos
         self.move = self._move
         self._current_target: Node = None
-        
+
         # Set `Shape` child
         shape: Shape = Shape()
         shape.set_rect(Rect(VECTOR_ZERO, self.sprite.atlas.base_size))
         self.add_child(shape, 0)
-        
+
         self.connect(self.collided, self, self._on_Body_collided)
 
     current_target: Node = property(lambda self: self.target, set_target)

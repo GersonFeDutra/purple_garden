@@ -1,3 +1,5 @@
+from enum import IntEnum
+
 # Window
 # BASE_SIZE: tuple[int, int] = 640, 360
 BASE_SIZE: tuple[int, int] = 320, 180
@@ -15,3 +17,8 @@ SPRITE_SIZE: tuple[int, int] = 32, 32
 # Groups
 ENEMY_GROUP: str = 'enemy'
 PLAYER_GROUP: str = 'player'
+
+
+class PhysicsLayers(IntEnum):
+    NATIVES_BODIES: int = 1
+    PLAYER_BODY: int = 2

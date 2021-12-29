@@ -70,59 +70,72 @@ def filter_locale(from_key: str) -> str:
     return 'en'  # Fallback to english
 
 
-# Setup the Engine
-root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
-# root.start(TITLE, screen_size=array(BASE_SIZE) * 2)
+def main(*args) -> None:
+    '''Setups the engine and runs the game.'''
 
-# %%
-# Setup Game's Content
+    # Setup the Engine
+    root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
 
-# Loading Resources
-ROOT_DIR: str = path.dirname(__file__)
-ASSETS_DIR: str = path.join(ROOT_DIR, 'assets')
-LOCALES_DIR: str = path.join(ASSETS_DIR, 'locales')
-SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
-SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
+    # Setup Game's Content
 
-GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
-DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
-TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
-lang: str = filter_locale(argv[argv.index('-l') + 1]) if '-l' in argv else None
+    # Loading Resources
+    ROOT_DIR: str = path.dirname(__file__)
+    ASSETS_DIR: str = path.join(ROOT_DIR, 'assets')
+    LOCALES_DIR: str = path.join(ASSETS_DIR, 'locales')
+    SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
+    SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
 
-if lang is None:
-    lang = filter_locale(locale.getdefaultlocale()[0][:2])
+    GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
+    DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
+    TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
 
-root.set_load_method(fetch_locales, LOCALES_DIR)
-root.set_locale(lang)
+    # Locales
+    lang: str
 
-spritesheet_data: dict[str, list[dict]] = fetch_spritesheet(
-    path.join(SPRITES_DIR, 'sheet1.json'))
+    try:
+        cmd: Union[tuple, list] = args if args else argv
+        lang = filter_locale(cmd[cmd.index('-l') + 1]) if '-l' in cmd else None
+    except IndexError:
+        lang = None
 
-# SpriteSheet
-root.sprites_groups = {
-    root.DEFAULT_GROUP: sprite.Group(),
-    PLAYER_GROUP: sprite.Group(),
-    ENEMY_GROUP: sprite.Group(),
-}
-spritesheet: Surface = pygame.image.load(
-    path.join(SPRITES_DIR, 'sheet1.png')
-)
+    if lang is None:
+        lang = filter_locale(locale.getdefaultlocale()[0][:2])
 
-# Sound Streams
-sound_fxs: dict[str, Sound] = {}
+    root.set_load_method(fetch_locales, LOCALES_DIR)
+    root.set_locale(lang)
 
-for sfx in ['death', 'score', 'jump']:
-    sound_fxs[sfx] = Sound(path.join(SOUNDS_DIR, f'{sfx}.wav'))
+    # SpriteSheet
+    spritesheet_data: dict[str, list[dict]] = fetch_spritesheet(
+        path.join(SPRITES_DIR, 'sheet1.json'))
 
-# Sets the first scene.
-root.current_scene = debug_call(
-    lambda: TitleScreen(
-        spritesheet, spritesheet_data, sound_fxs,
-        DEFAULT_FONT, GUI_FONT, TITLE_FONT),
-    lambda: GameWorld(
-        spritesheet, spritesheet_data,
-        sound_fxs, DEFAULT_FONT, GUI_FONT)
-)()
+    root.sprites_groups = {
+        root.DEFAULT_GROUP: sprite.Group(),
+        PLAYER_GROUP: sprite.Group(),
+        ENEMY_GROUP: sprite.Group(),
+    }
+    spritesheet: Surface = pygame.image.load(
+        path.join(SPRITES_DIR, 'sheet1.png')
+    )
 
-# Runs the Engine
-root.run()
+    # Sound Streams
+    sound_fxs: dict[str, Sound] = {}
+
+    for sfx in ['death', 'score', 'jump']:
+        sound_fxs[sfx] = Sound(path.join(SOUNDS_DIR, f'{sfx}.wav'))
+
+    # Sets the first scene.
+    root.current_scene = debug_call(
+        lambda: TitleScreen(
+            spritesheet, spritesheet_data, sound_fxs,
+            DEFAULT_FONT, GUI_FONT, TITLE_FONT),
+        lambda: GameWorld(
+            spritesheet, spritesheet_data,
+            sound_fxs, DEFAULT_FONT, GUI_FONT)
+    )()
+
+    # Runs the Engine
+    root.run()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,7 +1,7 @@
-import warnings
 from pygame import Color, Surface, Vector2
 from numpy import array
 from src.core.nodes import Atlas, AtlasBook, Icon
+from src.core.lib.utils import push_warning
 
 
 def animation_slice(
@@ -10,7 +10,7 @@ def animation_slice(
     slices: list[dict] = data.get(str(tag))
 
     if not slices:
-        warnings.warn('spritesheet load error', SpriteSheetLoadError)
+        push_warning('spritesheet load error', SpriteSheetLoadError)
         return
 
     slice: dict = slices[0]
@@ -31,7 +31,7 @@ def spritesheet_slice(
     slices: list[dict] = data.get(str(tag))
 
     if not slices:
-        warnings.warn('spritesheet load error', SpriteSheetLoadError)
+        push_warning('spritesheet load error', SpriteSheetLoadError)
         return
 
     for slice in slices:
@@ -52,7 +52,7 @@ def get_icon_sequence_slice(
     slices: list[dict] = data.get(str(tag))
 
     if not slices:
-        warnings.warn('spritesheet load error', SpriteSheetLoadError)
+        push_warning('spritesheet load error', SpriteSheetLoadError)
         return
 
     slice: int = slices[from_slice]

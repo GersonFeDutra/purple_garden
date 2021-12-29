@@ -1,5 +1,5 @@
 # Purple Garden
-Game project for the programming lab discipline. Genre: harverst sin + survival tower defense.
+Game project for the programming lab discipline. Genre: harvest sin + survival tower defense.
 
 ## LICENSE
 

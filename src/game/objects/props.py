@@ -1,4 +1,5 @@
 from ..utils import animation_slice
+from ..consts import PhysicsLayers
 from src.core.nodes import *
 
 
@@ -9,13 +10,14 @@ def make_sprite(spritesheet: Surface, spritesheet_data: dict[str, list[dict]], c
     return sprite
 
 
-class Prop(Body):
+class Prop(StaticBody):
     sprite: Sprite
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  name: str = 'Prop', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color('#0d89c6')) -> None:
         super().__init__(name=name, coords=coords, color=color)
+        self.collision_mask = PhysicsLayers.NATIVES_BODIES
         # Set the Sprite
         self.sprite = make_sprite(spritesheet, spritesheet_data, color)
         self.add_child(self.sprite)

@@ -14,6 +14,7 @@ import warnings
 import webbrowser
 import pytweening as tween
 from enum import IntEnum
+from math import log2
 from numpy import array, ndarray
 from numpy.linalg import norm
 from collections import deque
@@ -116,7 +117,7 @@ class Entity:
 
         def disconnect(self, owner, observer) -> None:
             '''Desconecta o método pertencente ao nó indicado desse sinal.'''
-            if self._is_emiting:
+            if self._is_emitting:
                 self._cache_disconnections.append((owner, observer))
                 return
 
@@ -131,13 +132,13 @@ class Entity:
             Os argumentos passados para as funções conectadas são, respectivamente:
             os argumentos passados ao conectar a função, em seguida,
             os argumentos passados na emissão.'''
-            self._is_emiting = True
+            self._is_emitting = True
 
             for observer, data in self._observers.items():
                 data[0](*(data[1] + args))
 
-            self._is_emiting = False
-            # Disconecta os sinais colocados na fila durante a emissão.
+            self._is_emitting = False
+            # Desconecta os sinais colocados na fila durante a emissão.
             while self._cache_disconnections:
                 self.disconnect(*self._cache_disconnections.popleft())
 
@@ -145,7 +146,7 @@ class Entity:
             self.owner = owner
             self.name = name
             self._observers: dict[Entity, tuple[Callable, ]] = {}
-            self._is_emiting: bool = False
+            self._is_emitting: bool = False
             self._cache_disconnections: deque[tuple[Node, Node]] = deque()
 
     # Decorador
@@ -397,7 +398,7 @@ class Node(Entity):
         pass
 
     def _propagate(self, delta_time: float, parent_offset: ndarray = array(VECTOR_ZERO),
-                   parent_scale: ndarray = array(VECTOR_ONE), tree_pause: int = 0):
+                   parent_scale: ndarray = array(VECTOR_ONE), tree_pause: int = 0) -> None:
         '''Propaga os métodos virtuais na hierarquia da árvore, da seguinte forma:
         Primeiro as entradas são tomadas e então os desenhos são renderizados na tela.
         Logo em seguida, após a propagação nos filhos, o método `_process` é executado.'''
@@ -406,30 +407,22 @@ class Node(Entity):
         target_scale: ndarray = self.scale * parent_scale
         target_pos: ndarray = self.position + parent_offset
         offset: ndarray = self.get_cell() * target_scale * self.anchor
-        physics_helper: PhysicsHelper = PhysicsHelper(self)
         self._global_position = tuple(target_pos)
         self._global_scale = tuple(target_scale)
 
         self._draw(target_pos, target_scale, offset)
         tree_pause = tree_pause | root.tree_pause | self.pause_mode
-        self._subpropagate(delta_time, target_pos, target_scale,
-                           physics_helper.children, tree_pause)
+
+        # Propaga os métodos virtuais nos nós filhos.
+        for child in self._children_index:
+            child._propagate(delta_time, target_pos, target_scale, tree_pause)
 
         if not (tree_pause & Node.PauseModes.STOP or
                 tree_pause & Node.PauseModes.TREE_PAUSED
-                and not(self.pause_mode & Node.PauseModes.CONTINUE)):
+                and not(
+                    self.pause_mode & Node.PauseModes.CONTINUE)):
 
             self._process(delta_time)
-
-        return physics_helper.check_collisions()
-
-    def _subpropagate(self, delta_time: float, target_pos: ndarray, target_scale: ndarray,
-                      physics_helpers: deque, tree_pause: int) -> None:
-        '''Método auxiliar para propagar métodos virtuais nos nós filhos.'''
-
-        for child in self._children_index:
-            physics_helpers.append(child._propagate(
-                delta_time, target_pos, target_scale))
 
     def _process(self, delta: float) -> None:
         '''Método virtual para processamento de dados em cada passo/ frame.'''
@@ -1015,11 +1008,6 @@ class Icon(BaseAtlas):
     requer manipulação externa da lista.'''
     textures: list[Surface]
     texture_id: int = 0
-    # REFACTOR -> Mover esses atributos para a sub-classe necessária
-    plant: Node = None
-    grow_progress: float = 0.0
-    is_planting: bool = False
-    is_occupied: bool = False
 
     @staticmethod
     def get_spritesheet(texture: Surface, h_slice: int = 1, v_slice: int = 1,
@@ -1394,10 +1382,11 @@ class VisibilityNotifier(Shape):
 
 
 class TileMap(Node):
+    _Tile: type[Icon] = Icon
     width: int = 0
     height: int = 0
     grid: list[list[int]]
-    tiles: list[Icon]
+    tiles: list[_Tile]
     textures: list[Surface]
     _map: Surface = None
     _map_scaled: Surface = None
@@ -1413,7 +1402,7 @@ class TileMap(Node):
         global root
         super()._draw(target_pos, target_scale, offset)
         root.screen.blit(self._map_scaled, Rect(
-            self._layer.offset(), self._map_scaled.get_size())) 
+            self._layer.offset(), self._map_scaled.get_size()))
 
     def screen_to_map(self, x: int, y: int) -> tuple[int, int]:
         '''Converte uma posição na tela em um ponto do mapa.'''
@@ -1425,13 +1414,13 @@ class TileMap(Node):
     def world_to_map(self, x: int, y: int) -> tuple[int, int]:
         '''Converte uma posição global em um ponto do mapa.'''
         tile_size: ndarray = array(self.tile_size) * self._global_scale
-        
+
         return array((array((x, y)) - self._global_position) // tile_size, int)
 
     def get_cell(self) -> tuple[int, int]:
         return array(self.get_size()) * self.scale
 
-    def set_tile(self, tile: Icon, col: int, row: int) -> None:
+    def set_tile(self, tile: _Tile, col: int, row: int) -> None:
         last_column: int = len(self.grid) - 1
 
         if last_column < col:
@@ -1468,7 +1457,7 @@ class TileMap(Node):
         tile.rect.topleft = (
             self._tile_size * self._global_scale).astype('int') * (col, row)
 
-    def get_tile(self, col: int, row: int) -> Icon:
+    def get_tile(self, col: int, row: int) -> _Tile:
         tile: Icon
 
         try:
@@ -1534,12 +1523,12 @@ class TileMap(Node):
             self.del_tile(col, row)
 
     def set_tile_area(
-            self, tile: Icon, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
+            self, tile: _Tile, from_col: int,  from_row: int, to_col: int, to_row: int) -> None:
         id: int = tile.texture_id
 
         for i in range(from_col, to_col):
             for j in range(from_row, to_row):
-                new_tile: Icon = Icon(tile.textures)
+                new_tile: Icon = self._Tile(tile.textures)
                 new_tile.set_texture(id)
                 self.set_tile(new_tile, i, j)
 
@@ -1711,14 +1700,31 @@ class ProgressBar(Panel):
     progress: float = property(get_progress, set_progress)
 
 
-class Body(Node):
+class Body(Node, ABC):
     '''Nó com capacidades físicas (permite colisão).'''
     collided: Entity.Signal
+    collision_layer: int = 1
+    # Uma camada de colisão permite que o objeto receba colisão apenas de objetos
+    # cujo máscara tenha um bit compatível a si (veja: 'operações bitwise').
+    collision_mask: int = 1
+    # Uma máscara de colisão determina quais camadas o objeto pode colidir.
 
     def add_child(self, node: Node, at: int = -1) -> None:
         super().add_child(node, at=at)
 
+        # Se adiciona como o nó pai (no motor de física) dos
+        # primeiros outros nós físicos em ordem descendente.
+        descendents: deque[Node] = deque()
+        descendents.append(node)
+        while descendents:
+            descendent: Node = descendents.popleft()
+            descendent.physics_parent = self
+
+            if not isinstance(descendent, Body):
+                descendents.extend(descendent._children_index)
+
         if isinstance(node, Shape) and node.type & Shape.CollisionType.PHYSICS:
+            node.color = node.color.lerp(self.color, .5)
             self._on_Shape_rect_changed(node)
             node.connect(node.rect_changed, self, self._on_Shape_rect_changed)
 
@@ -1733,9 +1739,11 @@ class Body(Node):
     def _enter_tree(self) -> None:
         super()._enter_tree()
 
-        if not self.has_shape():
-            warnings.warn(
-                "A `Shape` node must be added as a child to process collisions.", category=Warning)
+        if self.has_shape():
+            root.physics_server.insert_body(self, self._BodyType)
+        else:
+            push_warning("A `Shape` node must be added as a child to process collisions.",
+                         category=Warning)
 
     def _process(self, delta: float) -> None:
         self._physics_process(delta)
@@ -1805,14 +1813,37 @@ class Body(Node):
         self.color = color
         self.collided = Entity.Signal(self, 'collided')
         self._active_shapes: list[Shape] = []
-
         self._bounds: Rect = None
-
         self._was_shapes_changed: False
         self._cached_bounds: Rect = None
+        self._layers_ids: dict[int, int] = {}
+        self._BodyType: type[Body] = Body
+
+
+class Area(Body):
+    '''Colisor genérico para detectar contato (não aplica física).'''
+
+    def __init__(self, name: str = 'Area', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color(11, 145, 145)) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+        self._BodyType = Area
+
+
+class StaticBody(Body):
+    '''Colisor estático usado primariamente para receber contato. Diferente de
+    um corpo cinemático. Não é atualizado automaticamente conforme se move.'''
+
+    def __init__(self, name: str = 'StaticBody', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color(79, 10, 125)) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+        self._BodyType = StaticBody
+        self.collision_layer = 0 # Por padrão, corpos estáticos não recebem colisão.
+        # Veja o algoritimo de verificação de colisões na classe `PhysicsServer`.
 
 
 class KinematicBody(Body):
+    '''Colisor dinâmico usado para aplicação de física
+    (atualiza a colisão conforme se movimenta).'''
     _was_collided: bool = False
     _last_motion: tuple[float, float]
     _cache_motion: Vector2
@@ -1830,8 +1861,10 @@ class KinematicBody(Body):
     def move_and_collide(self, velocity: Vector2) -> None:
         self._cache_motion += velocity
 
-    def __init__(self, name: str = 'KinematicBody', coords: tuple[int, int] = VECTOR_ZERO, color: Color = Color(46, 10, 115)) -> None:
+    def __init__(self, name: str = 'KinematicBody', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color(160, 25, 125)) -> None:
         super().__init__(name=name, coords=coords, color=color)
+        self._BodyType = KinematicBody
         self._last_motion = VECTOR_ZERO
         self._cache_motion = Vector2(self._last_motion)
 
@@ -2500,142 +2533,139 @@ class PopupDialog(Popup):
         self.add_child(label)
 
 
-class PhysicsHelper():
-    '''Objeto responsável pelo tratamento de colisões entre corpos físicos.'''
-    _container_type: int = 0
-    rect: Rect = None
-    head: Node
+class PhysicsServer():
+    '''Singleton responsável pelo registro de corpos físicos
+    (colisores) e tratamento das colisões entre eles.'''
+    _instance = None
 
-    class ContainerTypes(IntEnum):
-        '''Enum para classificação dos nós entre contêineres ou corpos.'''
-        EMPTY = 0  # Sem conteúdo
-        SOLID = 1  # Corpo físico
-        SHELL = 2  # Não é um corpo físico, mas contém filhos que o são
+    '''Um objeto físico serve de contêiner para outros objetos físicos.
+    No caso do nó do tipo `Body`, este contém listas ordenadas (de acordo
+    com o tipo e critério de cada lista) de todos os primeiros nós
+    descendentes que são do tipo `Body`.'''
 
-    def __init__(self, head: Node) -> None:
-        self.head = head
-        helper: PhysicsHelper = self
-        self.children: deque[PhysicsHelper] = deque()
+    class PhysicsSpace(Generic[T]):
+        def __init__(self) -> None:
+            self.masks: list[T] = []  # Espaço que gera colisões.
+            self.layers: list[T] = []  # Espaço que recebe colisões.
 
-    def check_collisions(self):
-        '''Verifica as colisões entre nós colisores. Retorna um auxiliar para permitir a construção
-        de contêineres delimitadores em formato de árvore.'''
-        is_solid: bool = isinstance(
-            self.head, Body) and self.head.has_shape()
-        self._container_type = int(is_solid)
+    def process_collisions(self) -> None:
 
-        content: list = []  # Estrutura auxiliar para indexar os elementos posteriormente
-        content_n: int = 0  # Quantidade de elementos do contêiner
-        # Contêiner que armazenará nós colisores e outros contêineres
-        container: PhysicsHelper = PhysicsHelper(self.head)
-        # um contêiner é uma "casca/ invólucro" quando comporta elementos (nó interno ou raiz).
-        container._container_type = PhysicsHelper.ContainerTypes.SHELL
+        for space in self.areas:
+            # Colisão entre áreas
+            PhysicsServer._check_collisions(space.masks, space.layers)
 
-        def non_empty(c: PhysicsHelper) -> Rect:
-            '''O corpo/ contêiner é adicionado à fila do novo contêiner.
-            retorna seu colisor/ caixa delimitadora, respectivamente.'''
-            nonlocal content, content_n, container
+        min_len: int = min(len(self.kinematic_bodies), len(self.static_bodies))
+        for i, space in enumerate(self.kinematic_bodies[:min_len]):
+            # Colisão entre corpos dinâmicos
+            PhysicsServer._check_collisions(space.masks, space.layers)
+            # Colisão com corpo estático
+            PhysicsServer._check_collisions(
+                self.static_bodies[i].masks, space.layers)
+            # PhysicsServer._check_collisions(space.masks, self.static_bodies[i].layers)
+            # WATCH -> Permite que o corpo estático receba colisões.
 
-            content.append(c)
-            container.children.append(c)
-            content_n += 1
+        # Colisões restantes
+        for space in self.kinematic_bodies[min_len:]:
+            PhysicsServer._check_collisions(space.masks, space.layers)
 
-            return c.rect
+    def insert_body(self, body: Body, _type: type[Body]) -> None:
+        '''Insere um nó ordenadamente nos registros do espaço físico.'''
+        # bounds: Rect = body.bounds()
+        _PS: type = PhysicsServer.PhysicsSpace
+        layers: list[int] = PhysicsServer.get_bitflags(body.collision_layer)
+        masks: list[int] = PhysicsServer.get_bitflags(body.collision_mask)
+        space: list[_PS[Body]] = self.MATCH[_type]
 
-        # def empty(c: PhysicsHelper) -> None:
-        #     return None
+        if layers:
+            space_max: int = len(space) - 1
+            _higher_layer: int = int(log2(layers[-1]))
+            # Se a camada maior ao qual o corpo será adicionado for um valor
+            # maior do que o espaço existente, mais espaço é adicionado.
+            if _higher_layer > space_max:
+                new_layers: int = _higher_layer - space_max
 
-        _match: dict[int, Callable[[PhysicsHelper], Rect]] = {
-            # Nada será feito, o conteúdo se perde.
-            PhysicsHelper.ContainerTypes.EMPTY: lambda c: None,
-            PhysicsHelper.ContainerTypes.SOLID: non_empty,
-            PhysicsHelper.ContainerTypes.SHELL: non_empty,
-        }
+                for _ in range(new_layers):
+                    space.append(_PS())
 
-        if is_solid:
-            # Se for sólido, se adiciona no topo da fila (para mantê-lo como uma folha na árvore).
-            self.rect = self.head.bounds()
-            container.rect = non_empty(self)
+            # Insere o corpo às camadas selecionadas.
+            for i, _ in enumerate(layers):
+                space[i].layers.append(body)
 
-        while self.children and not container.rect:
-            # Busca o primeiro nó para iniciar a caixa delimitadora do contêiner.
-            child: PhysicsHelper = self.children.popleft()
-            container.rect = _match[child._container_type](child)
+        if masks:
+            space_max: int = len(space) - 1
+            _higher_mask: int = int(log2(masks[-1]))
 
-        while self.children:
-            # Adiciona os nós restantes.
-            child: PhysicsHelper = self.children.popleft()
-            rect: Rect = _match[child._container_type](child)
+            if _higher_mask > space_max:
+                new_masks: int = _higher_mask - space_max
 
-            if rect:
-                container.rect = container.rect.union(rect)
+                for _ in range(new_masks):
+                    space.append(_PS())
 
-        # Finaliza a configuração da raiz.
-        if content_n > 1:
-            # Verifica colisões nos filhos
-            PhysicsHelper._check_collisions(container.children, content_n)
-        elif content_n == 1:
-            # Caso o contêiner tenha apenas um elemento, este não será necessário.
-            container = container.children[0]
-        else:
-            # Retornará a si mesmo (um contêiner vazio).
-            # Note que jamais será sólido pois, se assim fosse, teria sido adicionado no contêiner
-            # e o bloco acima seria aplicada.
-            container = self
-
-        return container
+            # Insere o corpo às máscaras selecionadas.
+            for i, _ in enumerate(masks):
+                space[i].masks.append(body)
 
     @staticmethod
-    def _check_collisions(helpers: list, helpers_n: int) -> None:
-        '''Algoritmo iterativo que checa as colisões nos filhos do nó passado.
-        Sempre em direção às folhas.'''
-        next_children: deque[dict[str, list]] = deque()
+    def _check_collisions(masks: list[Body], layers: list[Body]):
+        _bounds: type = list[tuple[Body, Rect]]
+        mask_bounds: _bounds = []
+        layer_bounds: _bounds = []
+
+        for mask in masks:
+            mask_bounds.append((mask, mask.bounds()))
+        for layer in layers:
+            layer_bounds.append((layer, layer.bounds()))
 
         # Verifica as combinações de elementos.
-        for i in range(helpers_n):
-            for j in range(i + 1, helpers_n):
-                PhysicsHelper._check_collision(
-                    helpers[i], helpers[j], next_children)
-
-        while next_children:
-            next: dict = next_children.popleft()
-
-            for a in next['a']:
-                for b in next['b']:
-                    PhysicsHelper._check_collision(a, b, next_children)
+        for mask, m_bounds in mask_bounds:
+            for layer, l_bounds in layer_bounds:
+                if m_bounds.colliderect(l_bounds) and mask.is_colliding(layer):
+                    layer.collided.emit(mask)
 
     @staticmethod
-    def _check_collision(a, b, next_children: deque[dict[str, list]]) -> None:
-        '''Função auxiliar que verifica a colisão entre nós
-        (verifica intersecção dos colisores dos contêineres aos corpos físicos).'''
+    def get_bitflags(from_value: int) -> list[int]:
+        tmp: int = from_value
+        counter: int = 1
+        layers: list[int] = []
 
-        if a.rect.colliderect(b.rect):
-            is_all_leaf: bool = True
+        while tmp > 0:
+            layer: int = from_value & counter
+            counter *= 2
 
-            # Se o nó tiver filhos, fazemos a verificação entre eles e o outro nó colisor.
-            if a.children:
-                next_children.append({
-                    'a': a.children,
-                    'b': [b],
-                })
-                is_all_leaf = False
+            if layer != 0:
+                layers.append(layer)
+                tmp -= layer
 
-            elif b.children:
-                next_children.append({
-                    'a': [a],
-                    'b': b.children
-                })
-                is_all_leaf = False
+        return layers
 
-            if is_all_leaf:
-                node_a: Body = a.head
-                node_b: Body = b.head
+    def __new__(cls):
+        # Torna a classe em uma Singleton
+        if cls._instance is None:
+            # Criação do objeto
+            cls._instance = super(PhysicsServer, cls).__new__(cls)
 
-                # Quando houver colisão nas folhas, o sinal `collided` é emitido para cada colisor.
-                if node_a.is_colliding(node_b):
-                    # TODO -> Colisões unilaterais (collider & collision) + (layers & masks)
-                    node_a.collided.emit(node_b)
-                    node_b.collided.emit(node_a)
+        return cls._instance
+
+    def __init__(self) -> None:
+        _PS: type[PhysicsServer.PhysicsSpace] = PhysicsServer.PhysicsSpace
+        self.areas: list[_PS[Area]] = [
+            # _PS(), # Camada 1 (ímpar)
+            # _PS(), # Camada 2 (par)
+            # _PS(), # Camada 4 (2²)
+            # _PS(), # Camada 8 (2³)
+            # _PS(), # Camada 16 (2^4)
+            # _PS(), # Camada 32 (2^5)
+            # _PS(), # Camada 64 (2^6)
+            # _PS(), # Camada 128 (2^7)
+            # ...
+        ]
+        self.static_bodies: list[_PS[StaticBody]] = []
+        self.kinematic_bodies: list[_PS[KinematicBody]] = []
+        self.MATCH: dict[type[Body], _PS] = {
+            Area: self.areas,
+            StaticBody: self.static_bodies,
+            KinematicBody: self.kinematic_bodies,
+        }
 
 
 # root
@@ -2644,6 +2674,9 @@ class SceneTree(CanvasLayer):
     Definido dessa forma para facilitar acessos globais.'''
     pause_toggled: Node.Signal
     locale_changed: Node.Signal
+
+    # Motor de física.
+    physics_server: PhysicsServer = PhysicsServer()
 
     # Default Screen - Onde os nós da árvore irão desenhar sobre.
     # Atualmente os valores não são sincronizados individualmente, ao invés disso,
@@ -2701,7 +2734,7 @@ class SceneTree(CanvasLayer):
         '''Game's Main Loop.'''
 
         if self.current_scene is None:
-            warnings.warn('The Game needs an active scene to be able to run.')
+            push_warning('The Game needs an active scene to be able to run.')
             return
 
         while True:
@@ -2729,6 +2762,8 @@ class SceneTree(CanvasLayer):
             # `Sprites` e `Labels` aplicam blit individualmente no método `_draw`
 
             pygame.display.update()
+            # Verifica as colisões antes da próxima iteração.
+            self.physics_server.process_collisions()
 
     def pause_tree(self, pause_mode: int = Node.PauseModes.TREE_PAUSED) -> None:
         self.tree_pause = pause_mode
@@ -2834,6 +2869,9 @@ class SceneTree(CanvasLayer):
     def get_current_scene(self) -> Node:
         return self._current_scene
 
+    def get_physics_parent(self):
+        return self.physics_server
+
     def _input_event(self, event: InputEvent) -> None:
         # FOCUS_ACTION
         if not self._current_focus:
@@ -2874,11 +2912,7 @@ class SceneTree(CanvasLayer):
     def _get_tree(self) -> dict[str, Union[Node, list[Node]]]:
 
         def get_child(node: Node) -> Node:
-            f_child = node._children_index[:1]
-
-            if f_child:
-                return f_child[0]
-            return None
+            return node._children_index[0] if node._children_index else None
 
         # pointers
         tree: dict[str, Union[Node, list[dict]]] = {
