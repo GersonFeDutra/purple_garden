@@ -408,6 +408,102 @@ class Node(Entity):
         e o deslocamento na célula (sobre seu ponto de ancoragem).'''
         super()._draw(target_pos, target_scale, offset)
 
+    def _draw_tree(self, parent_offset: ndarray = array(VECTOR_ZERO),
+                   parent_scale: ndarray = array(VECTOR_ONE)) -> None:
+        target_scale: ndarray = self.scale * parent_scale
+        target_pos: ndarray = self.position + parent_offset
+        offset: ndarray = self.get_cell() * target_scale * self.anchor
+
+        self._global_position = tuple(target_pos)
+        self._global_scale = tuple(target_scale)
+        self._draw_order(target_pos, target_scale, offset)
+
+    def _draw_hierarchy(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
+                        offset: tuple[int, int]) -> None:
+        self._draw(target_pos, target_scale, offset)
+
+        for child in self._children_index:
+            child._draw_tree(target_pos, target_scale)
+
+    def _draw_y_sorted(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
+                       offset: tuple[int, int]) -> None:
+        self._draw(target_pos, target_scale, offset)
+        children: list[Node] = self._children_index.copy()
+
+        def partition(children: list[Node], low: int, high: int) -> int:
+            i: int = low - 1
+            y: int = children[high]._global_position[Y]
+
+            for j in range(low, high):
+                if children[j]._global_position[Y] <= y:
+                    # Incrementa o índice do menor elemento
+                    i = i + 1
+                    children[i], children[j] = children[j], children[i]
+
+            _swap_id: int = i + 1
+            children[_swap_id], children[high] = children[high], children[_swap_id]
+
+            return _swap_id
+
+        def quick_sort(children: list[Node], low: int, high: int) -> None:
+            '''Ordena os nós, iterativamente, de acordo com a posição Y.
+                children[] --> Vetor a ser ordenado,
+                `low`  --> Índice inicial,
+                `high`  --> Índice final.
+            '''
+            # Cria uma pilha auxiliar
+            size = high - low + 1
+            stack = [0] * (size)
+
+            # Inicializa o topo da pilha
+            top = - 1
+
+            # Empurra os valores iniciais de `low` e `high` para pilha
+            top = top + 1
+            stack[top] = low
+            top = top + 1
+            stack[top] = high
+
+            # Continua removendo da pilha enquanto não estiver vazio.
+            while top >= 0:
+                # Remove `high` e `low`
+                high = stack[top]
+                top = top - 1
+                low = stack[top]
+                top = top - 1
+
+                # Define o elemento pivô na sua posição correta da lista ordenada
+                pivot_id: int = partition(children, low, high)
+
+                # Se houver um nó no lado esquerdo do pivô,
+                # coloca o da esquerda na pilha.
+                if pivot_id - 1 > low:
+                    top = top + 1
+                    stack[top] = low
+                    top = top + 1
+                    stack[top] = pivot_id - 1
+
+                # Se há elementos no lado direito do pivô,
+                # coloca o da direita na pilha.
+                if pivot_id + 1 < high:
+                    top = top + 1
+                    stack[top] = pivot_id + 1
+                    top = top + 1
+                    stack[top] = high
+
+        @debug_method
+        def log(children: list[Node]) -> None:
+            l: list[int] = []
+            for child in children:
+                l.append(child.position[Y])
+            return
+
+        quick_sort(children, 0, len(children) - 1)
+        log(children)
+
+        for child in children:
+            child._draw_tree(target_pos, target_scale)
+
     def _input(self) -> None:
         '''Método virtual chamado no passo de captura de entradas dos nós.'''
         for child in self._children_index:
@@ -417,25 +513,16 @@ class Node(Entity):
         '''Método virtual chamado quando um determinado evento de entrada ocorrer.'''
         pass
 
-    def _propagate(self, parent_offset: ndarray = array(VECTOR_ZERO),
-                   parent_scale: ndarray = array(VECTOR_ONE), tree_pause: int = 0) -> None:
+    def _propagate(self, tree_pause: int = 0) -> None:
         '''Propaga os métodos virtuais na hierarquia da árvore, da seguinte forma:
         Primeiro as entradas são tomadas e então os desenhos são renderizados na tela.
         Logo em seguida, após a propagação nos filhos, o método `_process` é executado.'''
         global root
-
-        target_scale: ndarray = self.scale * parent_scale
-        target_pos: ndarray = self.position + parent_offset
-        offset: ndarray = self.get_cell() * target_scale * self.anchor
-        self._global_position = tuple(target_pos)
-        self._global_scale = tuple(target_scale)
-
-        self._draw(target_pos, target_scale, offset)
         tree_pause = tree_pause | root.tree_pause | self.pause_mode
 
         # Propaga os métodos virtuais nos nós filhos.
         for child in self._children_index:
-            child._propagate(target_pos, target_scale, tree_pause)
+            child._propagate(tree_pause)
 
         if not (tree_pause & Node.PauseModes.STOP or
                 tree_pause & Node.PauseModes.TREE_PAUSED
@@ -448,6 +535,10 @@ class Node(Entity):
         '''Método virtual para processamento de dados em cada passo/ frame.
         Para obter o tempo decorrido desde o último frame use: `root.delta`.'''
         pass
+
+    def set_use_y_sort(self, value: bool) -> None:
+        self._use_y_sort = value
+        self._draw_order = self._draw_y_sorted if value else self._draw_hierarchy
 
     def __repr__(self) -> str:
         return f'{self.name}: {type(self)}'
@@ -462,12 +553,17 @@ class Node(Entity):
         self.freed = Entity.Signal(self, 'freed')
         self.name: str = name
         self._is_on_tree: bool = False
+        self._global_position: tuple[int, int] = tuple(coords)
+        self._global_scale: tuple[float, float] = VECTOR_ONE
+        self._current_groups: list[str] = []
         self._children_index: list[Node] = []
         self._children_refs: dict[str, Node] = {}
         self._parent: Node = None
-        self._current_groups: list[str] = []
-        self._global_position: tuple[int, int] = tuple(coords)
-        self._global_scale: tuple[float, float] = VECTOR_ONE
+        self._use_y_sort: bool = False
+        self._draw_order: Callable[[tuple[int, int], tuple[float, float], tuple[int, int]], None] =\
+            self._draw_hierarchy
+
+    use_y_sort: bool = property(lambda self: self._use_y_sort, set_use_y_sort)
 
 
 class Camera(Node):
@@ -2890,7 +2986,10 @@ class SceneTree(CanvasLayer):
 
             self._propagate()
             # Propaga o processamento
-            # `Sprites` e `Labels` aplicam blit individualmente no método `_draw`
+
+            self._draw_tree()
+            # Desenha a árvore.
+            # `Sprite`s e `Label`s aplicam blit individualmente no método `_draw`
 
             pygame.display.update()
             # Verifica as colisões antes da próxima iteração.

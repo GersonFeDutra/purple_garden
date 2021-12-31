@@ -178,6 +178,7 @@ class GroundGrid(TileMap):
                  name: str = 'GroundGrid', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(tile_size, name=name, coords=coords)
         self._active_bars = {}
+        self.use_y_sort = True
         self.color = Color('#663649')
         self.scale = array(scale)
         self.gardener = gardener

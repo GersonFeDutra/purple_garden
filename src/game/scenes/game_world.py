@@ -151,27 +151,30 @@ class Level(Node):
             if IS_DEBUG_ENABLED else self.spawn_native
 
         # Level Setup
+
         center: ndarray = array(size) // 2
         self.center = tuple(center)
+
         # Sets the Ship
-        self.ship = Ship(spritesheet, spritesheet_data,
-                         coords=center - (0, 150))
+        self.ship = Ship(
+            spritesheet, spritesheet_data, coords=center - (0, 150))
+
         # Sets the Player in level space
         player: Player = Player(
             spritesheet, spritesheet_data,
             sound_fxs['death'], coords=tuple(center))
-        player.scale = array(SPRITES_SCALE)
         self.player = player
+
         # Sets the BackGround Grid
         grid_size: tuple[int, int] = array(ceil(
             size / (self.scale * array(SPRITES_SCALE, float) * CELL_SIZE)), int)
         bg: GroundGrid = GroundGrid(
             grid_size, CELL, SPRITES_SCALE, spritesheet, spritesheet_data, player)
         self.bg = bg
+        bg.add_child(player)
 
         # Construção da árvore
         self.add_child(bg)
-        self.add_child(player)
 
 
 class GameWorld(Node):

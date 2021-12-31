@@ -95,7 +95,6 @@ class Player(Char):
         root.add_to_group(self, PLAYER_GROUP)
 
         self.death_sfx = death_sfx
-        self.scale = array(SPRITES_SCALE)
         self._points: int = 0
         self._start_position = coords
 
