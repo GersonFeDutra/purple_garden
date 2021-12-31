@@ -71,15 +71,6 @@ class GUI(Node):
         self.add_child(display)
 
 
-class Limits(Shape):
-
-    def __init__(self, size: tuple[int, int], name: str = 'Limits',
-                 coords: tuple[int, int] = VECTOR_ZERO) -> None:
-        super().__init__(name=name, coords=coords)
-        self._debug_fill_bounds = False
-        self.set_rect(Rect(VECTOR_ZERO, size))
-
-
 class Level(Node):
     '''Node that holds all "space related" nodes.
     That is the "world" and all objects that can be interected with.'''
@@ -108,8 +99,8 @@ class Level(Node):
         wave_length /= 10.
         spawn_frequency = 3.
 
-    def _process(self, delta: float) -> None:
-        self.elapsed_time += delta / root.fixed_fps
+    def _process(self) -> None:
+        self.elapsed_time += root.delta
 
         if self.elapsed_time >= self.spawn_frequency * (self.spawns + 1):
             self._spawn_native(self)
@@ -167,7 +158,7 @@ class Level(Node):
                          coords=center - (0, 150))
         # Sets the Player in level space
         player: Player = Player(
-            Limits(root.screen_size), spritesheet, spritesheet_data,
+            spritesheet, spritesheet_data,
             sound_fxs['death'], coords=tuple(center))
         player.scale = array(SPRITES_SCALE)
         self.player = player
@@ -185,6 +176,7 @@ class Level(Node):
 
 class GameWorld(Node):
     '''First Game's Scene.'''
+    map_limits: tuple[int, int]
 
     def __init__(self, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
@@ -194,6 +186,8 @@ class GameWorld(Node):
         root.screen_color = colors.GRAY
 
         map_size: tuple[int, int] = array(root.get_screen_size()) * 3
+        self.map_limits = map_size
+
         # Construção da cena
         level: Level = Level(
             map_size, spritesheet, spritesheet_data, sound_fxs)

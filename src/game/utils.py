@@ -1,7 +1,12 @@
+from typing import Union
 from pygame import Color, Surface, Vector2
 from numpy import array
-from src.core.nodes import Atlas, AtlasBook, Icon
+from math import sqrt
+from src.core.nodes import Area, Atlas, AtlasBook, Icon
 from src.core.lib.utils import push_warning
+from src.core.lib.vectors import VECTOR_ZERO, X, Y
+
+_NUMBER: type[Union[int, float]] = Union[int, float]
 
 
 def animation_slice(
@@ -65,6 +70,12 @@ def get_icon_sequence_slice(
         bounds['x'], bounds['y']), sprite_size=(bounds['w'] / h_slices, bounds['h'] / v_slices))
 
 
+def get_distance(a: tuple[_NUMBER], b: tuple[_NUMBER]) -> float:
+    dx: int = a[X] - b[X]
+    dy: int = a[Y] - b[Y]
+    return sqrt(dx * dx + dy * dy)
+    
+
 class SpriteSheetLoadError(Warning):
     '''Fail loading SpriteSheet. Color code do not match.'''
 
@@ -102,3 +113,33 @@ class Steering():
 
         steering = (desired_velocity - velocity) / mass
         return velocity + steering
+
+
+
+class HitBox(Area):
+    strength: int = 1
+    # WATCH
+    
+    def __init__(self, mask: int, name: str = 'HitBox', coords: tuple[int, int] = VECTOR_ZERO,
+                 color: Color = Color(145, 11, 145)) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+        self.collision_layer = 0
+        self.collision_mask = mask
+
+
+class HurtBox(Area):
+    health: int = 0
+    
+    def _on_HitBox_entered(self, body: Area) -> None:
+        # WATCH
+        # self.health -= body.has_shape
+        return
+    
+    def __init__(self, layer: int, name: str = 'HurtBox', coords: tuple[int, int] = VECTOR_ZERO,
+                color: Color = Color(145, 11, 11)) -> None:
+        super().__init__(name=name, coords=coords, color=color)
+        self.connect(self.body_entered, self._on_HitBox_entered, self._on_HitBox_entered)
+        self.collision_layer = layer
+        self.collision_mask = 0
+
+

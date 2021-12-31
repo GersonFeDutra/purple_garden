@@ -21,4 +21,6 @@ PLAYER_GROUP: str = 'player'
 
 class PhysicsLayers(IntEnum):
     NATIVES_BODIES: int = 1
-    PLAYER_BODY: int = 2
+    PLAYER_HITBOX: int = 2
+    PLAYER_BODY: int = 4
+    PLANTS_VIEW: int = 8

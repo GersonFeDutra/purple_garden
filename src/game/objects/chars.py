@@ -2,7 +2,7 @@ from pygame.mixer import Sound
 from random import randint
 from src.core.nodes import *
 from ..consts import *
-from ..utils import Steering, spritesheet_slice
+from ..utils import HurtBox, Steering, spritesheet_slice
 from .plants import Plant, Rose, Violet
 
 
@@ -42,15 +42,14 @@ class Player(Char):
 
     was_collided: bool = False
     death_sfx: Sound = None
-    limits: Shape
     hand_item: type[Plant] = Rose
     hand_items: list[type[Plant]] = [Rose, Violet]
     _start_position: tuple[int, int]
 
-    def _physics_process(self, delta: float) -> None:
+    def _physics_process(self, factor: float) -> None:
         self.sprite.atlas.set_flip(int(self._velocity[X] < 0))
         self.move_and_collide(self._velocity * self.speed)
-        super()._physics_process(delta)
+        super()._physics_process(factor)
 
     def _input(self) -> None:
         self._velocity = Input.get_input_strength()
@@ -82,7 +81,7 @@ class Player(Char):
     def get_points(self) -> None:
         return self._points
 
-    def __init__(self, limits: Shape, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  death_sfx: Sound, coords: tuple[int, int] = VECTOR_ZERO) -> None:
         global root, input, root, SPRITE_SIZE, SPRITES_SCALE, PLAYER_GROUP
         super().__init__(spritesheet, spritesheet_data,
@@ -100,12 +99,10 @@ class Player(Char):
         self._points: int = 0
         self._start_position = coords
 
-        self.limits = limits
-
         # TODO -> Shoot
         # input.register_event(self, KEYDOWN, K_SPACE, self.JUMP)
 
-        #self.collided.connect(self, self, self._on_Body_collided)
+        #self.body_entered.connect(self, self, self._on_Body_collided)
 
         # Set the Shape
         shape: Shape = Shape()
@@ -133,16 +130,16 @@ class Native(Char):
     move: Callable[[float], None]
     _is_flipped: bool = False
 
-    def _physics_process(self, delta: float) -> None:
-        self.move(delta)
+    def _physics_process(self, factor: float) -> None:
+        self.move(factor)
 
-    def _follow(self, delta: float) -> None:
+    def _follow(self, factor: float) -> None:
         self._velocity = Steering.follow(Vector2(
             *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
         self.move_and_collide(self._velocity * self.speed)
-        super()._physics_process(delta)
+        super()._physics_process(factor)
 
-    def _move(self, delta: float) -> None:
+    def _move(self, factor: float) -> None:
         self._velocity = Steering.follow(Vector2(
             *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
         is_flipped: bool = self._velocity.x > 0.0
@@ -152,7 +149,7 @@ class Native(Char):
             self._is_flipped = is_flipped
 
         self.move_and_collide(self._velocity * self.speed)
-        super()._physics_process(delta)
+        super()._physics_process(factor)
 
     def set_target(self, value: Node) -> None:
         self._current_target = value
@@ -162,7 +159,7 @@ class Native(Char):
 
         if body.name == 'Ship':
             self.move = NONE_CALL
-            self.disconnect(self.collided, self)
+            self.disconnect(self.body_entered, self)
 
     def __init__(self, final_target_pos: tuple[int, int], max_hp_range: tuple[int, int],
                  spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
@@ -175,13 +172,21 @@ class Native(Char):
         self.final_target_pos = final_target_pos
         self.move = self._move
         self._current_target: Node = None
-
-        # Set `Shape` child
+        
+        # Sets `HurtBox`
+        hurt_box: HurtBox = HurtBox(PhysicsLayers.NATIVES_BODIES)
+        hurt_box.collision_mask = PhysicsLayers.PLANTS_VIEW
         shape: Shape = Shape()
-        shape.set_rect(Rect(VECTOR_ZERO, self.sprite.atlas.base_size))
+        shape.set_rect(Rect(VECTOR_ZERO, array(self.sprite.atlas.base_size) - (12, 6)))
+        hurt_box.add_child(shape)
+        self.add_child(hurt_box, 0)
+
+        # Sets the `Shape` child
+        shape = Shape()
+        shape.set_rect(Rect(VECTOR_ZERO, array(self.sprite.atlas.base_size) - (16, 10)))
         self.add_child(shape, 0)
 
-        self.connect(self.collided, self, self._on_Body_collided)
+        self.connect(self.body_entered, self, self._on_Body_collided)
 
     current_target: Node = property(lambda self: self.target, set_target)
 

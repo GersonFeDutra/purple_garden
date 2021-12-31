@@ -10,8 +10,8 @@ class TemporaryBar(ProgressBar):
     duration: float = 1.0
     _elapsed_time: float = 0.0
 
-    def _process(self, delta: float) -> None:
-        self._elapsed_time += delta
+    def _process(self) -> None:
+        self._elapsed_time += root.delta
 
         if self._elapsed_time >= self.duration:
             self.finished.emit()
@@ -52,9 +52,9 @@ class GroundGrid(TileMap):
         super()._enter_tree()
 
         # Spawn OXTree
-        self.spawn_plant(OxTree, array(self.map_size) // 2)
+        self.spawn_plant(OxTree, array(self.map_size) // 2)        
 
-    def _process(self, delta: float) -> None:
+    def _process(self) -> None:
         tile_coords: tuple[int, int] = self.screen_to_map(*mouse.get_pos())
         self.marker.position = tile_coords * self.tile_size * self._global_scale
         self.marker.atlas.set_texture(
@@ -71,7 +71,7 @@ class GroundGrid(TileMap):
                 pass
                 # Harvest
             else:
-                tile.grow_progress += delta / root.fixed_fps
+                tile.grow_progress += root.delta
                 self._display_loading_bar(
                     tuple(tile_coords), tile.grow_progress)
 
@@ -172,8 +172,9 @@ class GroundGrid(TileMap):
             side_flipper: int = randint(0, 1)
             return (side_flipper * self.map_size[X]) + offset[X] - 2 * offset[X] * side_flipper, randint(offset[Y], self.map_size[Y] - offset[Y] - 1)
 
-    def __init__(self, map_size: tuple[int, int], tile_size: tuple[int, int], scale: tuple[int, int],
-                 spritesheet: Surface, spritesheet_data: dict[str, list[dict]], gardener: Player,
+    def __init__(self, map_size: tuple[int, int], tile_size: tuple[int, int],
+                 scale: tuple[int, int], spritesheet: Surface,
+                 spritesheet_data: dict[str, list[dict]], gardener: Player,
                  name: str = 'GroundGrid', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(tile_size, name=name, coords=coords)
         self._active_bars = {}

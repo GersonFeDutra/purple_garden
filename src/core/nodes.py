@@ -14,7 +14,7 @@ import warnings
 import webbrowser
 import pytweening as tween
 from enum import IntEnum
-from math import log2
+from math import log2, sqrt
 from numpy import array, ndarray
 from numpy.linalg import norm
 from collections import deque
@@ -81,7 +81,6 @@ class InputEvent:
 class Entity:
     '''Entidade básica do jogo, que contém informações de espaço (2D).'''
     position: ndarray
-    scale: ndarray
 
     class SignalNotExists(Exception):
         pass
@@ -171,11 +170,13 @@ class Entity:
               offset: tuple[int, int] = None) -> None:
         '''Atualiza as pinturas na tela.
         Recebe uma posição, escala e deslocamento pré-calculados.'''
+        self._draw_cell(target_pos, target_scale, offset)
+
+    def _draw_cell_(self, target_pos: tuple[int, int] = None,
+                    target_scale: tuple[float, float] = None,
+                    offset: tuple[int, int] = None) -> None:
+        '''Desenha o espaço da célula do nó atual. Útil para visualização em modo de testes.'''
         global root
-
-        if not self._draw_cell:
-            return
-
         cell: ndarray = self.get_cell()
 
         if target_pos is None:
@@ -218,7 +219,7 @@ class Entity:
         except Entity.Signal.NotOwner:
             raise Entity.SignalNotExists
 
-    def disconnect(self, signal, observer) -> None:
+    def disconnect(self, signal: Signal, observer) -> None:
         '''Desconecta um sinal pertencente ao nó.'''
         try:
             signal.disconnect(self, observer)
@@ -237,23 +238,37 @@ class Entity:
     def get_anchor(self) -> tuple[int, int]:
         return tuple(self._anchor)
 
+    def set_scale(self, value: ndarray) -> None:
+        self._scale = value
+
+    def get_scale(self) -> ndarray:
+        return self._scale
+
+    def set_can_draw_cell(self, value: bool) -> None:
+        self._can_draw_cell = value
+        self._draw_cell = self._draw_cell_ if value else NONE_CALL
+
     def __init__(self, coords: tuple[int, int] = VECTOR_ZERO):
         self.position = array(coords)
-        self.scale = array(VECTOR_ONE)
+        self._scale = array(VECTOR_ONE)
         self._anchor = array(CENTER)
         self._color: Color = Color(0, 185, 225, 125)
         self._debug_fill_bounds: bool = False
-        self._draw_cell = IS_DEBUG_ENABLED
         self._layer: CanvasLayer = None
+        self.set_can_draw_cell(IS_DEBUG_ENABLED)
 
-    color: property = property(get_color, set_color)
-    anchor: property = property(get_anchor, set_anchor)
+    color: Color = property(get_color, set_color)
+    scale: ndarray = property(get_scale, set_scale)
+    anchor: tuple[int, int] = property(get_anchor, set_anchor)
+    can_draw_cell: bool = property(
+        lambda self: self._can_draw_cell, set_can_draw_cell)
 
 
 class Node(Entity):
     '''Classe fundamental que representa um objeto quaisquer do jogo.
     Permite a composição desses objetos em uma estrutura de árvore.
     Sua principal vantagem é a propagação de ações e eventos.'''
+    freed: Entity.Signal
 
     class PauseModes(IntEnum):
         '''Bit-flags para verificação do modo de parada no processamento da árvore.'''
@@ -263,8 +278,6 @@ class Node(Entity):
         # Interrompe o processamento do nó, mas continua processando os filhos.
         CONTINUE: int = 4
         IGNORE: int = 8  # Mantém o processando o nó.
-
-    pause_mode: int = PauseModes.IGNORE
 
     class EmptyName(Exception):
         pass
@@ -276,6 +289,8 @@ class Node(Entity):
     class DuplicatedChild(InvalidChild):
         '''Lançado ao tentar inserir um filho de mesmo nome.'''
         pass
+
+    pause_mode: int = PauseModes.IGNORE
 
     def add_child(self, node, at: int = -1) -> None:
         '''Registra um nó na árvore como filho do nó atual.'''
@@ -326,6 +341,11 @@ class Node(Entity):
         else:
             # Remove a flag de pausa, se estiver inserida.
             self.pause_mode = self.pause_mode & ~Node.PauseModes.TREE_PAUSED
+
+    def free(self) -> None:
+        if self._parent is not None:
+            self._parent.remove_child(self)
+        self.freed.emit(self)
 
     def get_child(self, name: str = '', at: int = -1):
         '''Busca um nó filho, por nome ou índice.'''
@@ -397,7 +417,7 @@ class Node(Entity):
         '''Método virtual chamado quando um determinado evento de entrada ocorrer.'''
         pass
 
-    def _propagate(self, delta_time: float, parent_offset: ndarray = array(VECTOR_ZERO),
+    def _propagate(self, parent_offset: ndarray = array(VECTOR_ZERO),
                    parent_scale: ndarray = array(VECTOR_ONE), tree_pause: int = 0) -> None:
         '''Propaga os métodos virtuais na hierarquia da árvore, da seguinte forma:
         Primeiro as entradas são tomadas e então os desenhos são renderizados na tela.
@@ -415,17 +435,18 @@ class Node(Entity):
 
         # Propaga os métodos virtuais nos nós filhos.
         for child in self._children_index:
-            child._propagate(delta_time, target_pos, target_scale, tree_pause)
+            child._propagate(target_pos, target_scale, tree_pause)
 
         if not (tree_pause & Node.PauseModes.STOP or
                 tree_pause & Node.PauseModes.TREE_PAUSED
                 and not(
                     self.pause_mode & Node.PauseModes.CONTINUE)):
 
-            self._process(delta_time)
+            self._process()
 
-    def _process(self, delta: float) -> None:
-        '''Método virtual para processamento de dados em cada passo/ frame.'''
+    def _process(self) -> None:
+        '''Método virtual para processamento de dados em cada passo/ frame.
+        Para obter o tempo decorrido desde o último frame use: `root.delta`.'''
         pass
 
     def __repr__(self) -> str:
@@ -438,6 +459,7 @@ class Node(Entity):
         if not name:
             raise Node.EmptyName
 
+        self.freed = Entity.Signal(self, 'freed')
         self.name: str = name
         self._is_on_tree: bool = False
         self._children_index: list[Node] = []
@@ -459,7 +481,7 @@ class Camera(Node):
         target: Node
 
         @abstractmethod
-        def scroll(self, delta: float) -> None:
+        def scroll(self) -> None:
             '''Método virtual responsável pela rolagem da câmera.'''
 
         def __init__(self, target: Node) -> None:
@@ -469,7 +491,7 @@ class Camera(Node):
 
     class Follow(Scroll):
 
-        def scroll(self, delta: float) -> None:
+        def scroll(self) -> None:
             self._camera.raw_offset.xy = \
                 array(self.target.get_global_position())
 
@@ -485,8 +507,8 @@ class Camera(Node):
     class FollowLimit(Follow):
         limit: tuple[int, int, int, int]
 
-        def scroll(self, delta: float) -> None:
-            super().scroll(delta)
+        def scroll(self) -> None:
+            super().scroll()
             self._camera.offset = clamp(self.limit[X], self._camera.offset[X], self.limit[W]), \
                 clamp(self.limit[Y], self._camera.offset[Y], self.limit[H])
             return
@@ -512,8 +534,8 @@ class Camera(Node):
     raw_offset: Vector2
     scroll: Scroll = None
 
-    def _process(self, delta: float):
-        self.scroll.scroll(delta)
+    def _process(self) -> None:
+        self.scroll.scroll()
 
     def get_cell(self) -> tuple[int, int]:
         global root
@@ -707,9 +729,7 @@ class Tween():
 
     def _process(self, delta: float) -> None:
         '''Process the easing method.'''
-        global root
-
-        self._elapsed_time += delta / root.fixed_fps
+        self._elapsed_time += delta
 
         if self._elapsed_time > self.duration:
             setattr(self.target, self.name, self.to_value)
@@ -744,7 +764,7 @@ class Tween():
 
         self.duration = duration
         self.ease_method = ease_method
-        self._process(self._elapsed_time)
+        self._process(root.delta)
         root._active_tweens.append(self)
 
     # TODO -> `interpolate_method()`
@@ -1288,6 +1308,10 @@ class Shape(Node):
 
     type: int = CollisionType.PHYSICS
 
+    if IS_DEBUG_ENABLED:
+        _normal_color: Color = None
+        _overlap_color: Color = None
+
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
               offset: tuple[int, int]) -> None:
         super()._draw(target_pos, target_scale, offset)
@@ -1317,11 +1341,26 @@ class Shape(Node):
         '''Retorna a caixa delimitadora da forma.'''
         return self._rect
 
+    @Node.debug()
+    def _shift_color(self, *args) -> None:
+        self.color = self._overlap_color if args[0] else self._normal_color
+
+    @Node.debug()
+    def _setup_overlap(self, parent) -> None:
+        '''Método chamado por um nó pai do tipo "corpo físico", para auxiliar
+        na visualização de colisões durante os testes em modo de debug.'''
+        self._normal_color = self.color
+        self._overlap_color = Color(
+            255 - self.color.a, 255 - self.color.g, 255 - self.color.b, self.color.a)
+        parent.connect(parent.body_entered, self, self._shift_color, True)
+        parent.connect(parent.body_exited, self, self._shift_color, False)
+
     def __init__(self, name: str = 'Shape', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
+        self.rect_changed = Entity.Signal(self, 'rect_changed')
+
         self._rect: Rect = Rect(VECTOR_ZERO, VECTOR_ZERO)
         self._base_size = array(VECTOR_ZERO)
-        self.rect_changed = Entity.Signal(self, 'rect_changed')
         self._debug_fill_bounds = True
 
     rect: Rect = property(get_rect, set_rect)
@@ -1329,16 +1368,42 @@ class Shape(Node):
 
 
 class CircleShape(Shape):
-    radius: float = 1.0
 
-    def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float], offset: tuple[int, int]) -> None:
+    def _enter_tree(self) -> None:
+        super()._enter_tree()
+        self._scaled_radius = self._radius * self._global_scale[X]
+
+    def _draw_cell_(self, target_pos: tuple[int, int] = None,
+                    target_scale: tuple[float, float] = None,
+                    offset: tuple[int, int] = None) -> None:
         global root
-        super()._draw(target_pos, target_scale, offset)
-        draw.circle(root.screen, self.color, target_pos, self.radius)
+        # super()._draw(target_pos, target_scale, offset)
+        draw.circle(root.screen, self.color, target_pos +
+                    self._layer.offset(), self._radius * target_scale[X], self._debug_line_width)
 
-    def __init__(self, name: str = 'CircleShape', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def set_scale(self, value: ndarray) -> None:
+        super().set_scale(value)
+        self._scaled_radius = self._radius * self._global_scale[X]
+
+    def set_radius(self, value: float) -> None:
+        self._radius = value
+        self._scaled_radius = self._radius * self._global_scale[X]
+
+        offset: ndarray = array((value, value), int)
+        self.set_rect(Rect(self.position - offset, offset * 2))
+
+    def __init__(self, name: str = 'CircleShape', coords: tuple[int, int] = VECTOR_ZERO,
+                 radius: float = 1.0) -> None:
         super().__init__(name=name, coords=coords)
-        self._debug_fill_bounds = False
+        self._debug_fill_bounds = True
+        # self._debug_length: Union[int, None] = 1 if self._debug_fill_bounds else None
+        self._debug_line_width: int = 1
+        self._radius: float = radius
+        self._scaled_radius: float = radius * self.scale[X]
+
+        self.set_radius(radius)
+
+    radius: float = property(lambda self: self._radius, set_radius)
 
 
 class VisibilityNotifier(Shape):
@@ -1622,7 +1687,7 @@ class Panel(Control):
         bar.color = borders_color
         bar.anchor = array(TOP_LEFT)
         bar.rect = Rect(VECTOR_ZERO, size)
-        bar._draw_cell = True
+        bar.can_draw_cell = True
         self.borders = bar
         self.add_child(bar)
 
@@ -1631,7 +1696,7 @@ class Panel(Control):
         bar.anchor = array(TOP_LEFT)
         bar.color = bg_color
         bar.rect = Rect(topleft, base_size)
-        bar._draw_cell = True
+        bar.can_draw_cell = True
         self.bg = bar
         self.add_child(bar)
 
@@ -1690,7 +1755,7 @@ class ProgressBar(Panel):
         bar.anchor = array(TOP_LEFT)
         bar.color = bar_color
         bar.rect = Rect(topleft, self._inner_size)
-        bar._draw_cell = True
+        bar.can_draw_cell = True
         self.bar = bar
         self.add_child(bar)
 
@@ -1701,8 +1766,12 @@ class ProgressBar(Panel):
 
 
 class Body(Node, ABC):
-    '''Nó com capacidades físicas (permite colisão).'''
-    collided: Entity.Signal
+    '''Nó com capacidades físicas (permite colisão: interação entre objetos
+    de acordo com propriedades físicas, tais como, posição e tamanho).'''
+    body_entered: Node.Signal
+    body_exited: Node.Signal
+
+    # TODO -> Atualizar os valores no `PhysicsServer` conforme forem alterados.
     collision_layer: int = 1
     # Uma camada de colisão permite que o objeto receba colisão apenas de objetos
     # cujo máscara tenha um bit compatível a si (veja: 'operações bitwise').
@@ -1712,19 +1781,9 @@ class Body(Node, ABC):
     def add_child(self, node: Node, at: int = -1) -> None:
         super().add_child(node, at=at)
 
-        # Se adiciona como o nó pai (no motor de física) dos
-        # primeiros outros nós físicos em ordem descendente.
-        descendents: deque[Node] = deque()
-        descendents.append(node)
-        while descendents:
-            descendent: Node = descendents.popleft()
-            descendent.physics_parent = self
-
-            if not isinstance(descendent, Body):
-                descendents.extend(descendent._children_index)
-
         if isinstance(node, Shape) and node.type & Shape.CollisionType.PHYSICS:
             node.color = node.color.lerp(self.color, .5)
+            node._setup_overlap(self)
             self._on_Shape_rect_changed(node)
             node.connect(node.rect_changed, self, self._on_Shape_rect_changed)
 
@@ -1745,11 +1804,23 @@ class Body(Node, ABC):
             push_warning("A `Shape` node must be added as a child to process collisions.",
                          category=Warning)
 
-    def _process(self, delta: float) -> None:
-        self._physics_process(delta)
+    def _process(self) -> None:
+        global root
+        self._physics_process(root.factor_fps)
 
-    def _physics_process(self, delta: float) -> None:
-        pass
+        for body in self._last_colliding_bodies:
+            if body in self._colliding_bodies:
+                continue
+            self.body_exited.emit(body)
+
+        # Limpa os últimos corpos colisores e armazena os atuais.
+        self._last_colliding_bodies.clear()
+        tmp: list[Body] = self._last_colliding_bodies
+        self._last_colliding_bodies = self._colliding_bodies
+        self._colliding_bodies = tmp
+
+    def _physics_process(self, factor: float) -> None:
+        '''Método virtual chamado no passo de processamento físico do nó físico.'''
 
     def _on_Shape_rect_changed(self, _shape: Shape) -> None:
 
@@ -1757,14 +1828,62 @@ class Body(Node, ABC):
             self._active_shapes.append(_shape)
             self._was_shapes_changed = True
 
-    # def _expand_bounds(self, with_shape: Rect) -> None:
-    #     '''Método auxiliar para expandir a caixa delimitadora desse corpo físico.'''
-    #
-    #     if self._bounds:
-    #         self._bounds = self._bounds.union(with_shape)
+    def _collide(self, body) -> None:
+        '''Método auxiliar chamado ao decorrer duma colisão.'''
+        self._colliding_bodies.append(body)
+
+        if body in self._last_colliding_bodies:
+            return
+
+        self.body_entered.emit(body)
 
     def has_shape(self) -> bool:
         return bool(self._active_shapes)
+
+    @staticmethod
+    def check_CC_collision(a: CircleShape, b: CircleShape) -> bool:
+        '''Colisão entre círculos'''
+        a_radius: float = a._scaled_radius
+        b_radius: float = b._scaled_radius
+        dx: float = (a._global_position[X] + a_radius) - \
+            (b._global_position[X] + b_radius)
+        dy: float = (a._global_position[Y] + a_radius) - \
+            (b._global_position[Y] + b_radius)
+        distance: float = sqrt(dx * dx + dy * dy)
+
+        return distance < a_radius + b_radius
+
+    @staticmethod
+    def check_CR_collision(circle: CircleShape, shape: Shape) -> bool:
+        '''Colisão entre círculo-retângulo'''
+        rect: Rect = shape.rect
+        radius: float = circle._scaled_radius
+        dx: int = abs(circle._global_position[X] - shape._global_position[X])
+        dy: int = abs(circle._global_position[Y] - shape._global_position[Y])
+
+        if dx > rect.width / 2 + radius:
+            return False
+
+        if dy > rect.height / 2 + radius:
+            return False
+
+        if dx <= rect.width / 2:
+            return True
+
+        if dy <= rect.height / 2:
+            return True
+
+        corner_distance_squared: float = (
+            dx - rect.width / 2) ** 2 + (dy - rect.height / 2) ** 2
+        return corner_distance_squared <= radius ** 2
+
+    # @Benchmarked: tabela de dispersão mais rápida que indexação.
+    COLLISION_TABLE: list[Callable[[Shape, Shape], bool]] = {
+        (True, True): check_CC_collision,
+        (True, False): check_CR_collision,
+        (False, False): lambda shape_a, shape_b: shape_a.rect.colliderect(shape_b.rect),
+        (False, True): lambda rect, circle: Body.check_CR_collision(circle, rect),
+    }
 
     def is_colliding(self, target) -> bool:
         ''''Verifica colisões com o corpo indicado.'''
@@ -1772,19 +1891,10 @@ class Body(Node, ABC):
         for a in self._active_shapes:
             for b in target._active_shapes:
 
-                if not a.rect.colliderect(b.rect):
-                    continue
-
-                had_collided: bool = True
-                for collider, collision in ((a, b), (b, a)):
-                    if isinstance(collider, CircleShape) and \
-                            Vector2(collider.get_global_position()) \
-                            .distance_to(collision.get_global_position()) > collider.radius:
-                        had_collided = False
-                    else:
-                        return True
-
-                return had_collided
+                if Body.COLLISION_TABLE[
+                        isinstance(a, CircleShape),
+                        isinstance(b, CircleShape)](a, b):
+                    return True
 
         return False
 
@@ -1811,12 +1921,16 @@ class Body(Node, ABC):
                  color: Color = Color(46, 10, 115)) -> None:
         super().__init__(name, coords=coords)
         self.color = color
-        self.collided = Entity.Signal(self, 'collided')
-        self._active_shapes: list[Shape] = []
+        self.body_entered = Node.Signal(self, 'body_entered')
+        self.body_exited = Node.Signal(self, 'body_exited')
+
+        self._was_shapes_changed: bool = False
         self._bounds: Rect = None
-        self._was_shapes_changed: False
         self._cached_bounds: Rect = None
+        self._active_shapes: list[Shape] = []
         self._layers_ids: dict[int, int] = {}
+        self._colliding_bodies: list[Body] = []
+        self._last_colliding_bodies: list[Body] = []
         self._BodyType: type[Body] = Body
 
 
@@ -1837,7 +1951,8 @@ class StaticBody(Body):
                  color: Color = Color(79, 10, 125)) -> None:
         super().__init__(name=name, coords=coords, color=color)
         self._BodyType = StaticBody
-        self.collision_layer = 0 # Por padrão, corpos estáticos não recebem colisão.
+        # Por padrão, corpos estáticos não recebem colisão.
+        self.collision_layer = 0
         # Veja o algoritimo de verificação de colisões na classe `PhysicsServer`.
 
 
@@ -1848,9 +1963,9 @@ class KinematicBody(Body):
     _last_motion: tuple[float, float]
     _cache_motion: Vector2
 
-    def _physics_process(self, delta: float) -> None:
+    def _physics_process(self, factor: float) -> None:
         # Move
-        motion: Vector2 = self._cache_motion * delta  # \
+        motion: Vector2 = self._cache_motion * factor  # \
         # * (1 - int(self._was_collided) * 2)  # Velocity * Direction
         # (Inverte a direção se colidir)
         self.position += array(motion, int)
@@ -1869,7 +1984,7 @@ class KinematicBody(Body):
         self._cache_motion = Vector2(self._last_motion)
 
         # TODO -> Physics collision
-        # self.connect(self.collided, self, self)
+        # self.connect(self.body_entered, self, self)
 
 
 class Popup(Panel):
@@ -2100,7 +2215,7 @@ class BaseButton(Control):
     label: Text
     _rect: Rect
 
-    def _process(self, delta: float) -> None:
+    def _process(self) -> None:
         self._mouse_input()
 
     def _input_event(self, event: InputEvent) -> None:
@@ -2548,6 +2663,22 @@ class PhysicsServer():
             self.masks: list[T] = []  # Espaço que gera colisões.
             self.layers: list[T] = []  # Espaço que recebe colisões.
 
+    def _on_Body_freed(self, _type: type[Body], body: Body) -> None:
+        '''Remove um nó dos registros do espaço físico.'''
+        _PS: type = PhysicsServer.PhysicsSpace
+        layers: list[int] = PhysicsServer.get_bitflags(body.collision_layer)
+        masks: list[int] = PhysicsServer.get_bitflags(body.collision_mask)
+        space: list[_PS[Body]] = self.MATCH[_type]
+        body.disconnect(body.freed, self)
+
+        # Remove o corpo das camadas selecionadas.
+        for layer in layers:
+            space[int(log2(layer))].layers.remove(body)
+
+        # Remove o corpo das máscaras selecionadas.
+        for mask in masks:
+            space[int(log2(mask))].masks.remove(body)
+
     def process_collisions(self) -> None:
 
         for space in self.areas:
@@ -2575,6 +2706,7 @@ class PhysicsServer():
         layers: list[int] = PhysicsServer.get_bitflags(body.collision_layer)
         masks: list[int] = PhysicsServer.get_bitflags(body.collision_mask)
         space: list[_PS[Body]] = self.MATCH[_type]
+        body.connect(body.freed, self, self._on_Body_freed, _type)
 
         if layers:
             space_max: int = len(space) - 1
@@ -2588,8 +2720,8 @@ class PhysicsServer():
                     space.append(_PS())
 
             # Insere o corpo às camadas selecionadas.
-            for i, _ in enumerate(layers):
-                space[i].layers.append(body)
+            for layer in layers:
+                space[int(log2(layer))].layers.append(body)
 
         if masks:
             space_max: int = len(space) - 1
@@ -2602,8 +2734,8 @@ class PhysicsServer():
                     space.append(_PS())
 
             # Insere o corpo às máscaras selecionadas.
-            for i, _ in enumerate(masks):
-                space[i].masks.append(body)
+            for mask in masks:
+                space[int(log2(mask))].masks.append(body)
 
     @staticmethod
     def _check_collisions(masks: list[Body], layers: list[Body]):
@@ -2620,7 +2752,7 @@ class PhysicsServer():
         for mask, m_bounds in mask_bounds:
             for layer, l_bounds in layer_bounds:
                 if m_bounds.colliderect(l_bounds) and mask.is_colliding(layer):
-                    layer.collided.emit(mask)
+                    layer._collide(mask)
 
     @staticmethod
     def get_bitflags(from_value: int) -> list[int]:
@@ -2697,6 +2829,8 @@ class SceneTree(CanvasLayer):
     # Game Clock
     clock: pygame.time.Clock = None
     fixed_fps: int = 60  # Frames Per Second
+    factor_fps: float = 0.0  # O Fator entre o fps atual e o fps fixo
+    delta: float = 0.0  # O tempo decorrido desde o último frame
 
     # Tweening
     _active_tweens: list[Tween] = []
@@ -2713,7 +2847,6 @@ class SceneTree(CanvasLayer):
     FOCUS_ACTION_DOWN: str = 'focus_action_down'
     FOCUS_ACTION_UP: str = 'focus_action_up'
     _current_focus: BaseButton = None
-    delta_persec: float = 0.0
 
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
@@ -2740,11 +2873,9 @@ class SceneTree(CanvasLayer):
         while True:
             # tick = self.clock.tick(self.fixed_fps)
             self.clock.tick(self.fixed_fps)
-            delta: float = self.clock.get_fps() / self.fixed_fps
-            self.delta_persec = delta / self.fixed_fps
-            # print(self.clock.get_fps() / self.fixed_fps)
-            # print(tick / self.fixed_fps)
-            # print(tick / max(0.0001, self.clock.get_fps()))
+            factor_fps: float = self.clock.get_fps() / self.fixed_fps
+            self.factor_fps = factor_fps
+            self.delta = factor_fps / 60.0
 
             self.screen.fill(self.screen_color)
             # Preenche a tela
@@ -2755,9 +2886,9 @@ class SceneTree(CanvasLayer):
 
             # Processa os tweens ativos na lista
             for tween in self._active_tweens:
-                tween._process(delta)
+                tween._process(self.delta)
 
-            self._propagate(delta)
+            self._propagate()
             # Propaga o processamento
             # `Sprites` e `Labels` aplicam blit individualmente no método `_draw`
 
@@ -2816,6 +2947,16 @@ class SceneTree(CanvasLayer):
         node._set_is_on_focus(True)
         self._current_focus = node
 
+    @Node.debug()
+    def log(self, message: str) -> None:
+        self._log.text = message
+
+    @Node.debug()
+    def _setup_log(self) -> None:
+        self._log: Label = Label(font.SysFont(
+            'roboto', 20, False, False), 'Log', color=Color('#ffffff'))
+        self.add_child(self._log)
+
     def get_delta_time(self) -> float:
         '''Calculates and returns the current delta time-step.'''
         return self.clock.get_fps() / self.fixed_fps
@@ -2864,13 +3005,10 @@ class SceneTree(CanvasLayer):
             self.remove_child(self._current_scene)
 
         self._current_scene = scene
-        self.add_child(scene)
+        self.add_child(scene, 0)
 
     def get_current_scene(self) -> Node:
         return self._current_scene
-
-    def get_physics_parent(self):
-        return self.physics_server
 
     def _input_event(self, event: InputEvent) -> None:
         # FOCUS_ACTION
@@ -2898,6 +3036,7 @@ class SceneTree(CanvasLayer):
         self._cached_locales: dict[str, dict[str, ]] = {}
         self._locale_load_method: Callable[[str, str], dict[str, ]] = None
         self._layer = self
+        self._setup_log()
 
         # Events
         self.pause_toggled = Node.Signal(self, 'pause_toggled')
@@ -2907,8 +3046,8 @@ class SceneTree(CanvasLayer):
             input.register_event(self, KEYDOWN, key, SceneTree.FOCUS_ACTION_UP)
             input.register_event(self, KEYUP, key, SceneTree.FOCUS_ACTION_DOWN)
 
-    # FIXME
-    @debug_method
+    # WATCH
+    @Node.debug()
     def _get_tree(self) -> dict[str, Union[Node, list[Node]]]:
 
         def get_child(node: Node) -> Node:
