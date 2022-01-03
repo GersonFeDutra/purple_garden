@@ -73,9 +73,6 @@ def filter_locale(from_key: str) -> str:
 def main(*args) -> None:
     '''Setups the engine and runs the game.'''
 
-    # Setup the Engine
-    root.start(TITLE, screen_size=BASE_SIZE * array(SPRITES_SCALE, dtype=int))
-
     # Setup Game's Content
 
     # Loading Resources
@@ -94,6 +91,10 @@ def main(*args) -> None:
     GUI_FONT: font.Font = font.Font(PIXELATED_FONT, 20)
     DEFAULT_FONT: font.Font = font.Font(PIXELATED_FONT, 40)
     TITLE_FONT: font.Font = font.Font(PIXELATED_FONT, 90)
+
+    # Setup the Engine
+    root.start(TITLE, screen_size=BASE_SIZE * array(
+        SPRITES_SCALE, dtype=int), gui_font=GUI_FONT)
 
     # Locales
     lang: str
@@ -129,6 +130,7 @@ def main(*args) -> None:
     # Sound Streams
     sound_fxs: dict[str, Sound] = {}
 
+    # TODO -> Remover sons
     for sfx in ['death', 'score', 'jump']:
         sound_fxs[sfx] = Sound(path.join(SOUNDS_DIR, f'{sfx}.wav'))
 

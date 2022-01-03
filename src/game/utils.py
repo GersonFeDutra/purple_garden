@@ -91,8 +91,11 @@ class Steering():
     def follow(
             velocity: Vector2, global_position: Vector2, target_position: Vector2,
             max_speed: float = DEFAULT_MAX_SPEED, mass: float = DEFAULT_MASS) -> Vector2:
-        desired_velocity: Vector2 = (
-            target_position - global_position).normalize() * max_speed
+        try:
+            desired_velocity: Vector2 = (
+                target_position - global_position).normalize() * max_speed
+        except ValueError:
+            return Vector2(*VECTOR_ZERO)
         steering: Vector2 = (desired_velocity - velocity) / mass
 
         return velocity + steering

@@ -54,7 +54,10 @@
    { "name": "ox_tree", "color": "#159a42ff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 0, "y": 0, "w": 32, "h": 32 } }] },
    { "name": "o2", "color": "#9ecfc6ff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 0, "y": 32, "w": 32, "h": 32 } }] },
    { "name": "rose_back", "color": "#fe5b59ff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 64, "y": 128, "w": 32, "h": 32 } }] },
-   { "name": "violet_back", "color": "#d186dfff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 96, "y": 128, "w": 32, "h": 32 } }] }
+   { "name": "violet_back", "color": "#d186dfff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 96, "y": 128, "w": 32, "h": 32 } }] },
+   { "name": "bio_brown", "color": "#413f30ff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 240, "y": 112, "w": 16, "h": 16 } }] },
+   { "name": "bio_blue", "color": "#401e54ff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 240, "y": 144, "w": 16, "h": 16 } }] },
+   { "name": "bio_yellow", "color": "#2f412eff", "data": "1,1", "keys": [{ "frame": 0, "bounds": {"x": 240, "y": 128, "w": 16, "h": 16 } }] }
   ]
  }
 }

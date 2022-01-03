@@ -26,5 +26,19 @@
 		"Pressione ENTER para ver os créditos!",
 		"Pressione ENTER para sair!"
 	],
-	"PRESS_TO_PLAY": "Pressione ENTER para jogar!"
+	"PRESS_TO_PLAY": "Pressione ENTER para jogar!",
+	"INTRO": [
+		"Olá jardineiro espacial!\n",
+		"Esse é o relatório da sua situação até um momento:\n",
+		"Durante seus experimentos com a biomassa, ocorreu um acidente que provocou\n",
+		"a queda da sua nave num planeta alienígena selvagem de nível Ω.\n",
+		"Suas instruções do guia do proletariado dos universos são:\n",
+		"[...] você deve aguardar até o sinal de socorro alcançar a civilização mais próxima.\n",
+		"Membros do proletariado espacial devem responder o chamado de imediato\n",
+		"Planetas selvagens costumam ter nativos famintos que irão consumir os seus recursos\n",
+		"Enquanto o chamado não for respondido você deve usar o máximo\n",
+		"de suas habilidades para garantir a sua sobrevivência.\n",
+		"Bosta aventureiro! (boa sorte) Que a força prevaleça! [...]\n",
+		"Fim do relatório. Pressione ESCAPE para fechar."
+	]
 }

@@ -42,8 +42,6 @@ def debug_call(cls: Callable, dbg_alt: Callable = None):
         return cls
 
 # Decorator
-
-
 def debug_method(dbg_alt: Callable = None):
     '''Decorador que faz o redirecionamento de uma função quando em modo de debug.'''
     def inner_function(function):
@@ -360,7 +358,7 @@ class Node(Entity):
         children: list[Node] = self._children_index.copy()
         for child in children:
             child.free()
-        
+
         self.freed.emit(self)
 
     def get_child(self, name: str = '', at: int = -1):
@@ -702,7 +700,7 @@ class CanvasLayer(Node):
 class Input:
     '''Classe responsável por gerenciar eventos de entrada.'''
     _instance = None
-    events: dict = {}
+    events: dict[int, dict[int, list[InputEvent]]] = {}
 
     class Mouse(IntEnum):
         LEFT_CLICK = 1
@@ -715,22 +713,70 @@ class Input:
         '''Lançado ao tentar registrar um evento em um objeto que não e do tipo `Node`.'''
         pass
 
+    class EventNotExists(UserWarning):
+        '''Lançado ao tentar remover um evento que não existe.'''
+
+    class EventTypeNotExists(EventNotExists):
+        '''Lançado ao tentar remover um evento cujo tipo que não foi registrado.'''
+
+    class EventKeyNotExists(EventNotExists):
+        '''Lançado ao tentar remover um evento cujo chave não foi registrada.'''
+
+    class EventTagNotExists(EventNotExists):
+        '''Lançado ao tentar remover um evento cujo chave não foi registrada.'''
+
     def register_event(self, to: Node, input_type: int, key: int, tag: str = '') -> None:
 
         if not isinstance(to, Node):
             raise Input.NotANode
 
-        event_type: dict = self.events.get(input_type)
+        event_type: dict[int, list[InputEvent]] = self.events.get(input_type)
         if not event_type:
             event_type = {}
             self.events[input_type] = event_type
 
-        event_key: list = event_type.get(key)
+        event_key: list[InputEvent] = event_type.get(key)
         if not event_key:
             event_key = []
             event_type[key] = event_key
 
         event_key.append(InputEvent(input_type, key, tag, to))
+
+    def remove_event(self, to: Node, input_type: int, key: int, tag: str = '') -> None:
+
+        if not isinstance(to, Node):
+            raise Input.NotANode
+
+        event_type: dict[int, list[InputEvent]] = self.events.get(input_type)
+        if not event_type:
+            raise Input.EventTypeNotExists
+
+        event_key: list[InputEvent] = event_type.get(key)
+        if not event_key:
+            raise Input.EventKeyNotExists
+
+        # TODO -> Optimizar usando um dicionário com base nos nós-alvo.
+        target_events: list[InputEvent] = []
+        for input_event in event_key:
+            if input_event.target == to:
+                target_events.append(input_event)
+
+        if not target_events:
+            raise Input.EventNotExists
+
+        # TODO -> Optimizar usando um dicionário com base nas tags.
+        if tag:
+            n_removed_events: int = 0
+            for target_event in target_events:
+                if target_event.tag == tag:
+                    event_key.remove(target_event)
+                    n_removed_events += 1
+
+            if n_removed_events == 0:
+                raise Input.EventTagNotExists
+        else:
+            for target_event in target_events:
+                event_key.remove(target_event)
 
     def get_input_strength() -> ndarray:
         '''Método auxiliar para calcular um input axial.'''
@@ -2182,7 +2228,7 @@ class StaticBody(Body):
         self._BodyType = StaticBody
         # Por padrão, corpos estáticos não recebem colisão.
         self.collision_layer = 0
-        # Veja o algoritimo de verificação de colisões na classe `PhysicsServer`.
+        # Veja o algoritmo de verificação de colisões na classe `PhysicsServer`.
 
 
 class KinematicBody(Body):
@@ -2217,9 +2263,19 @@ class KinematicBody(Body):
 
 
 class Popup(Panel):
+    ESCAPE_EVENT: str = 'esc'
+
     popup_finished: Node.Signal
     hided: Node.Signal
+
     pop_duration: float
+    _on_focus: bool = False
+    _on_pause_game: bool = False
+    # TODO -> Tornar o focus algo global dos nós do tipo control
+
+    def _input_event(self, event: InputEvent) -> None:
+        if event.tag is Popup.ESCAPE_EVENT:
+            self.hide(self._do_ease)
 
     def add_child(self, node: Node, at: int = -1) -> None:
 
@@ -2246,7 +2302,10 @@ class Popup(Panel):
 
         return node
 
-    def popup(self, do_ease: bool = None) -> None:
+    # WATCH -> Default focus to True
+    def popup(self, do_ease: bool = None, do_focus: bool = False, do_pause: bool = False) -> None:
+        self._on_focus = do_focus
+        self._on_pause_game = do_pause
 
         if do_ease is None:
             do_ease = self._do_ease
@@ -2287,8 +2346,28 @@ class Popup(Panel):
 
         self.popup_finished.emit()
 
+        if self._on_focus:
+            input.register_event(
+                self, KEYDOWN, K_ESCAPE, Popup.ESCAPE_EVENT)
+
+        if self._on_pause_game:
+            self.pause_mode = SceneTree.PauseModes.IGNORE
+            root.pause(True)
+        else:
+            self.pause_mode = SceneTree.PauseModes.STOP
+
     def _on_Hide(self) -> None:
         self.hided.emit()
+
+        if self._on_focus:
+            input.remove_event(
+                self, KEYDOWN, K_ESCAPE, Popup.ESCAPE_EVENT)
+        
+        if self._on_pause_game:
+            root.pause(False)
+
+    def set_on_focus(self, value: bool) -> None:
+        self._on_focus = value
 
     def __init__(self, name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
                  anchor: tuple[int, int] = TOP_LEFT, do_ease: bool = True, pop_duration: float = .3,
@@ -2864,7 +2943,7 @@ class PopupDialog(Popup):
         self.label.anchor = value
 
     def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
-                 name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
+                 name: str = 'PopUpDialog', coords: tuple[int, int] = VECTOR_ZERO,
                  anchor: tuple[int, int] = TOP_LEFT, do_ease: bool = True,
                  pop_duration: float = 0.3, bg_color: Color = colors.DEFAULT_POPUP,
                  borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
@@ -3076,6 +3155,7 @@ class SceneTree(CanvasLayer):
     _instance = None
     tree_pause: int = 0
     groups: dict[str, list[Node]] = {}
+    gui_font: font.Font = None
 
     _locale: str = 'en'
     _locales: dict[str, ]
@@ -3090,13 +3170,18 @@ class SceneTree(CanvasLayer):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
         pass
 
-    def start(self, title: str = 'Game', screen_size: tuple[int, int] = None) -> None:
+    def start(self, title: str = 'Game', screen_size: tuple[int, int] = None,
+              gui_font: font.Font = None) -> None:
         '''Setups the basic settings.'''
         self.clock = pygame.time.Clock()
 
-        if not (screen_size is None):
+        if screen_size is not None:
             self.screen_size = screen_size
 
+        self.gui_font = font.SysFont('roboto', 20, False, False)\
+            if gui_font is None else gui_font
+
+        self._setup_log()
         self.screen = pygame.display.set_mode(self.screen_size)
         #alpha_layer = Surface(SCREEN_SIZE, pygame.SRCALPHA)
         pygame.display.set_caption(title)
@@ -3209,8 +3294,8 @@ class SceneTree(CanvasLayer):
 
     @Node.debug()
     def _setup_log(self) -> None:
-        self._log: Label = Label(font.SysFont(
-            'roboto', 20, False, False), 'Log', color=Color('#ffffff'))
+        self._log: Label = Label(
+            self.gui_font, 'Log', color=Color('#ffffff'))
         self.add_child(self._log)
 
     def get_delta_time(self) -> float:
@@ -3292,7 +3377,6 @@ class SceneTree(CanvasLayer):
         self._cached_locales: dict[str, dict[str, ]] = {}
         self._locale_load_method: Callable[[str, str], dict[str, ]] = None
         self._layer = self
-        self._setup_log()
 
         # Events
         self.pause_toggled = Node.Signal(self, 'pause_toggled')

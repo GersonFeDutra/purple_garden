@@ -171,15 +171,18 @@ class Level(Node):
         bg: GroundGrid = GroundGrid(
             grid_size, CELL, SPRITES_SCALE, spritesheet, spritesheet_data, player)
         self.bg = bg
-        bg.add_child(player)
 
         # Construção da árvore
+        bg.add_child(player)
         self.add_child(bg)
 
 
 class GameWorld(Node):
     '''First Game's Scene.'''
     map_limits: tuple[int, int]
+
+    def _on_Dialog_hided(self, dialog: PopupDialog) -> None:
+        dialog.free()
 
     def __init__(self, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
@@ -200,6 +203,14 @@ class GameWorld(Node):
         self.add_child(level_layer)
         level_layer.add_child(level)
         self.add_child(gui)
+
+        if not IS_DEBUG_ENABLED:
+            intro: PopupDialog = PopupDialog(root.gui_font, coords=array(
+                root.screen_size) // 2, anchor=CENTER, size=array(root.screen_size) // 2)
+            intro.set_text(*root.tr('INTRO'))
+            intro.connect(intro.hided, self, self._on_Dialog_hided, intro)
+            gui.add_child(intro)
+            intro.popup(True, True, True)
 
         player: Player = level.player
 

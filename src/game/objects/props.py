@@ -24,12 +24,12 @@ class Prop(StaticBody):
 
 
 class Ship(Prop):
-    
+
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  name: str = 'Ship', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color('#394b5a')) -> None:
         super().__init__(spritesheet, spritesheet_data, name=name, coords=coords, color=color)
-        
+
         # Set `Sprite` child
         antenna: Sprite = make_sprite(spritesheet, spritesheet_data, Color('#323f4a'), name='Antenna')
         antenna.position = array((100, -120))

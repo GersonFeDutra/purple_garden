@@ -128,8 +128,6 @@ class Plant(Area, ABC):
 
         if not self._is_flip_v:
             sprite: Sprite = self.sprite
-            sprite.connect(sprite.animation_finished, self,
-                           self._on_Sprite_animation_finished)
             timer = self._timer
             timer.timeout.disconnect(timer, self)
 
@@ -138,6 +136,9 @@ class Plant(Area, ABC):
                                self._on_Sprite_anim_event_triggered, target)
                 self.animations.play_once(self.animation_attack, sprite, deque(
                     [self._atk_anim_trigger]), timer.elapsed_time)
+            else:
+                sprite.connect(sprite.animation_finished, self,
+                            self._on_Sprite_animation_finished)
 
     def _grow_up(self) -> None:
         self.sprite.atlas = self.animations
@@ -310,4 +311,4 @@ class OxTree(Sprite):
                  name: str = 'OxTree', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords, atlas=Icon(get_icon_sequence_slice(
             spritesheet, spritesheet_data, Color('#159a42'))))
-        self.get_anchor = array(TOP_LEFT)
+        self.anchor = array(TOP_LEFT)

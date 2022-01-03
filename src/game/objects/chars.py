@@ -127,6 +127,7 @@ class Native(Char):
     animation_attack: str
     animation_damage: str
     move: Callable[[float], None]
+    target: Node = None
 
     _damage_anim_duration: float
     _is_flipped: bool = False
@@ -146,7 +147,7 @@ class Native(Char):
 
     def _move(self, factor: float) -> None:
         self._velocity = Steering.follow(Vector2(
-            *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
+            *self._velocity), Vector2(*self._global_position), Vector2(*self.target_pos))
         is_flipped: bool = self._velocity.x > 0.0
 
         if self._is_flipped != is_flipped:
@@ -161,6 +162,9 @@ class Native(Char):
         # super()._physics_process(factor)
         self._timer._process(root.delta)
 
+    def _attack(self, factor: float) -> None:
+        self
+
     def set_target(self, value: Node) -> None:
         self._current_target = value
         self.move = self._move if value is None else self._follow
@@ -168,7 +172,8 @@ class Native(Char):
     def _on_Body_collided(self, body: Body) -> None:
 
         if body.name == 'Ship':
-            self.move = NONE_CALL
+            self.move = self._attack
+            self.target = body
             self.disconnect(self.body_entered, self)
 
     def _on_Timer_timeout(self, move: Callable[[float], None], animation: str, timer: Timer) -> None:
@@ -197,7 +202,7 @@ class Native(Char):
         self.free()
 
     def _on_Area_enter_view(self, area: Area) -> None:
-        return
+        self.target_pos = area._global_position
 
     def __init__(self, final_target_pos: tuple[int, int], max_hp_range: tuple[int, int],
                  spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
@@ -207,7 +212,7 @@ class Native(Char):
         super().__init__(spritesheet, spritesheet_data, name=name,
                          coords=coords, color=color, animation=animation_move)
         self.collision_layer = PhysicsLayers.NATIVES_BODIES
-        self.final_target_pos = final_target_pos
+        self.target_pos = self.final_target_pos = final_target_pos
         self.move = self._move
         self.animation_walk = animation_move
         self.animation_damage = animation_damage

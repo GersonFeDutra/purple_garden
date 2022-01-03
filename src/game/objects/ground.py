@@ -51,8 +51,8 @@ class GroundGrid(TileMap):
     def _enter_tree(self) -> None:
         super()._enter_tree()
 
-        # Spawn OXTree
-        self.spawn_plant(OxTree, array(self.map_size) // 2)        
+        # Spawn `OxTree`
+        self.spawn_plant(OxTree, array(self.map_size) // 2)
 
     def _process(self) -> None:
         tile_coords: tuple[int, int] = self.screen_to_map(*mouse.get_pos())

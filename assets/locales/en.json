@@ -26,5 +26,19 @@
 		"Press ENTER to see the credits!",
 		"Press ENTER to exit!"
 	],
-	"PRESS_TO_PLAY": "Press ENTER to play!"
+	"PRESS_TO_PLAY": "Press ENTER to play!",
+	"INTRO": [
+		"Welcome spatial gardener!\n",
+		"This is your status report so far:\n",
+		"During your biomass experiments, there was an accident that caused\n",
+		"the crash of your ship on a wild alien planet of level Ω.\n",
+		"Your instructions from the worker's guide of the universes are:\n",
+		"[...] you must wait until the distress signal reaches the nearest civilization.\n",
+		"Members of the space workers must respond immediately.\n",
+		"Wild planets often have hungry natives who will consume your resources.\n",
+		"While the call is not answered you should use the maximum\n",
+		"of your skills to ensure your survival.\n",
+		"Shit adventurer! (good luck) May the force prevail! [...]\n",
+		"End of report. Press ESCAPE to close."
+	]
 }
