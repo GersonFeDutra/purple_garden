@@ -2866,7 +2866,7 @@ class PopupDialog(Popup):
     def __init__(self, default_font: font.Font, fonts: dict[str, font.Font] = None,
                  name: str = 'PopUp', coords: tuple[int, int] = VECTOR_ZERO,
                  anchor: tuple[int, int] = TOP_LEFT, do_ease: bool = True,
-                 pop_duration: float = 0.3, bg_color: Color = colors.WHITE,
+                 pop_duration: float = 0.3, bg_color: Color = colors.DEFAULT_POPUP,
                  borders_color: Color = colors.GRAY, size: tuple[int, int] = (150, 75),
                  borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS,
                  padding: tuple[int, int, int, int] = (32, 32, 32, 32)) -> None:
@@ -2879,7 +2879,7 @@ class PopupDialog(Popup):
         super().__init__(name=name, coords=coords, anchor=anchor, do_ease=do_ease,
                          pop_duration=pop_duration,  bg_color=bg_color, borders_color=borders_color,
                          size=size, borders=borders)
-        label.color = colors.BLACK
+        label.color = colors.WHITE
         self.add_child(label)
 
 

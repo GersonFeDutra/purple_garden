@@ -1,6 +1,6 @@
 from pygame.mixer import Sound
 from src.core.nodes import *
-from src.core.lib.colors import BLUE, GREEN, RED, WHITE
+from src.core.lib.colors import BLUE, DEFAULT_POPUP, GREEN, RED, WHITE
 from .game_world import GameWorld
 
 
@@ -140,7 +140,7 @@ class TitleScreen(Node):
         self.gui_font = gui_font
         self.buttons = []
         self.info = root.tr('INFOS')
-        purple: Color = Color('#6E34B7')
+        purple: Color = DEFAULT_POPUP
 
         # Title Screen
         # root.screen_color = Color('#6E34B7')

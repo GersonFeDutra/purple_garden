@@ -84,10 +84,16 @@ def main(*args) -> None:
     LOCALES_DIR: str = path.join(ASSETS_DIR, 'locales')
     SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
     SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
+    FONTS_DIR: str = path.join(ASSETS_DIR, 'fonts')
 
     GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
     DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
     TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
+    PIXELATED_FONT: str = path.join(
+        FONTS_DIR, 'basis33', 'basis33.ttf')
+    GUI_FONT: font.Font = font.Font(PIXELATED_FONT, 20)
+    DEFAULT_FONT: font.Font = font.Font(PIXELATED_FONT, 40)
+    TITLE_FONT: font.Font = font.Font(PIXELATED_FONT, 90)
 
     # Locales
     lang: str
