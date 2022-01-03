@@ -10,7 +10,7 @@ class Char(KinematicBody):
     speed: float = 10.0
     sprite: Sprite
     _velocity: Vector2
-    _animation_speed: float = 0.1
+    _animation_speed: float = TextureSequence.DEFAULT_SPEED
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  name: str = 'Char', coords: tuple[int, int] = VECTOR_ZERO,
@@ -23,7 +23,7 @@ class Char(KinematicBody):
         # Set the Sprite
         atlas: AtlasBook = AtlasBook()
         self.sprite = Sprite(atlas=atlas)
-        spritesheet_slice(spritesheet, spritesheet_data, self.color, atlas)
+        spritesheet_slice(spritesheet, spritesheet_data, self._color, atlas)
         self.add_child(self.sprite)
 
         if animation is not None:
@@ -72,14 +72,11 @@ class Player(Char):
         self.was_collided = False
         self.position = self._start_position
         self.sprite.atlas.is_paused = False
-        self.points = 0
+        self._points = 0
 
     def set_points(self, value) -> None:
         self._points = value
         self.points_changed.emit(f'Points: {value}')
-
-    def get_points(self) -> None:
-        return self._points
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  death_sfx: Sound, coords: tuple[int, int] = VECTOR_ZERO) -> None:
@@ -119,15 +116,24 @@ class Player(Char):
         if IS_DEV_MODE_ENABLED:
             self.speed += 1.0
 
-    points: property = property(get_points, set_points)
+        self.points: int = property(
+            lambda _self: _self._points, self.set_points)
 
 
 class Native(Char):
-    atk: int = 1
-    hp: int
     final_target_pos: tuple[int, int]
+    target_pos: tuple[int, int]
+    animation_walk: str
+    animation_attack: str
+    animation_damage: str
     move: Callable[[float], None]
+
+    _damage_anim_duration: float
     _is_flipped: bool = False
+    _timer: Timer = None
+
+    def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float], offset: tuple[int, int]) -> None:
+        return super()._draw(target_pos, target_scale, offset)
 
     def _physics_process(self, factor: float) -> None:
         self.move(factor)
@@ -150,44 +156,104 @@ class Native(Char):
         self.move_and_collide(self._velocity * self.speed)
         super()._physics_process(factor)
 
+    def _knockback(self, _factor: float) -> None:
+        # self.move_and_collide(Vector2(*VECTOR_ZERO))
+        # super()._physics_process(factor)
+        self._timer._process(root.delta)
+
     def set_target(self, value: Node) -> None:
         self._current_target = value
         self.move = self._move if value is None else self._follow
 
-    def _on_Body_collided(self, body) -> None:
+    def _on_Body_collided(self, body: Body) -> None:
 
         if body.name == 'Ship':
             self.move = NONE_CALL
             self.disconnect(self.body_entered, self)
 
+    def _on_Timer_timeout(self, move: Callable[[float], None], animation: str, timer: Timer) -> None:
+        atlas: AtlasBook = self.sprite.atlas
+        atlas.set_current_animation(animation)
+        timer.timeout.disconnect(timer, self)
+        self.move = move
+        self._timer = None
+        # Retorna para o estado anterior
+
+    def _on_hurtted(self, _strength: int) -> None:
+
+        if self._timer is None:
+            atlas: AtlasBook = self.sprite.atlas
+            atlas.set_current_animation(self.animation_damage)
+            timer: Timer = Timer(self._damage_anim_duration)
+            self._timer = timer
+            self._timer.timeout.connect(
+                self._timer, self, self._on_Timer_timeout, self.move, self.animation_walk)
+            self.move = self._knockback
+        else:
+            # Reseta o timer
+            self._timer.elapsed_time = 0.0
+
+    def _on_health_depleated(self) -> None:
+        self.free()
+
+    def _on_Area_enter_view(self, area: Area) -> None:
+        return
+
     def __init__(self, final_target_pos: tuple[int, int], max_hp_range: tuple[int, int],
                  spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 animation_move: str, animation_damage: str, animation_attack: str,
                  name: str = 'Native', coords: tuple[int, int] = VECTOR_ZERO,
-                 color: Color = Color('#f3ce52'), animation: str = None) -> None:
+                 color: Color = Color('#f3ce52')) -> None:
         super().__init__(spritesheet, spritesheet_data, name=name,
-                         coords=coords, color=color, animation=animation)
+                         coords=coords, color=color, animation=animation_move)
         self.collision_layer = PhysicsLayers.NATIVES_BODIES
-        self.hp = randint(*max_hp_range)
         self.final_target_pos = final_target_pos
         self.move = self._move
+        self.animation_walk = animation_move
+        self.animation_damage = animation_damage
+        self.animation_attack = animation_attack
         self._current_target: Node = None
-        
+        animations: AtlasBook = self.sprite.atlas
+        self._damage_anim_duration = animations.animations[animation_damage].get_frames() * \
+            animations.sequence.speed / 60.0
+
         # Sets `HurtBox`
-        hurt_box: HurtBox = HurtBox(PhysicsLayers.NATIVES_BODIES)
+        hurt_box: HurtBox = HurtBox(
+            PhysicsLayers.NATIVES_BODIES, health=randint(*max_hp_range))
         hurt_box.collision_mask = PhysicsLayers.PLANTS_VIEW
+        hurt_box.connect(hurt_box.hitted, self, self._on_hurtted)
+        hurt_box.connect(hurt_box.health_depleated, self,
+                         self._on_health_depleated)
+
         shape: Shape = Shape()
-        shape.set_rect(Rect(VECTOR_ZERO, array(self.sprite.atlas.base_size) - (12, 6)))
+        shape.set_rect(Rect(VECTOR_ZERO, array(
+            self.sprite.atlas.base_size) - (12, 6)))
         hurt_box.add_child(shape)
-        self.add_child(hurt_box, 0)
+
+        # View Range
+        # WATCH
+        view_range: Area = Area('View', color=Color(145, 135, 25))
+        view_range.collision_layer = PhysicsLayers.NATIVES_VIEW
+        view_range.collision_mask = 0
+        view_range.connect(view_range.body_entered, self,
+                           self._on_Area_enter_view)
+
+        view: CircleShape = CircleShape(
+            radius=self.sprite.atlas.rect.size[X] * 4)
+        view_range.add_child(view)
 
         # Sets the `Shape` child
         shape = Shape()
-        shape.set_rect(Rect(VECTOR_ZERO, array(self.sprite.atlas.base_size) - (16, 10)))
-        self.add_child(shape, 0)
+        shape.set_rect(Rect(VECTOR_ZERO, array(
+            self.sprite.atlas.base_size) - (16, 10)))
 
         self.connect(self.body_entered, self, self._on_Body_collided)
 
-    current_target: Node = property(lambda self: self.target, set_target)
+        self.add_child(shape, 0)
+        self.add_child(hurt_box, 1)
+        self.add_child(view_range)
+        self.current_target: Node = property(
+            lambda _self: _self.target, self.set_target)
 
 
 class Hermiga(Native):
@@ -195,8 +261,10 @@ class Hermiga(Native):
     def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], name: str = 'Hermiga',
                  coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 6)) -> None:
-        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
-                         coords=coords, color=Color('#f3ce52'), animation='hermiga_walk')
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data,
+                         animation_move='hermiga_walk', animation_damage='hermiga_damage',
+                         animation_attack='hermiga_attack', name=name,
+                         coords=coords, color=Color('#f3ce52'))
         self.atk = 3
 
 
@@ -205,8 +273,10 @@ class Mosca(Native):
     def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], name: str = 'Mosca',
                  coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 5)) -> None:
-        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
-                         coords=coords, color=Color('#57b9f2'), animation='mosca_fly')
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data,
+                         animation_move='mosca_fly', animation_damage='mosca_damage',
+                         animation_attack='mosca_attack', name=name,
+                         coords=coords, color=Color('#57b9f2'))
         self.atk = 2
 
 
@@ -215,6 +285,8 @@ class Lunar(Native):
     def __init__(self, final_target_pos: tuple[int, int], spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], name: str = 'Lunar',
                  coords: tuple[int, int] = VECTOR_ZERO, max_hp_range: tuple[int, int] = (3, 4)) -> None:
-        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data, name=name,
-                         coords=coords, color=Color('#8e6b2b'), animation='lunar_dig')
+        super().__init__(final_target_pos, max_hp_range, spritesheet, spritesheet_data,
+                         animation_move='lunar_dig', animation_damage='lunar_damage',
+                         animation_attack='lunar_attack', name=name,
+                         coords=coords, color=Color('#8e6b2b'))
         self.atk = 1

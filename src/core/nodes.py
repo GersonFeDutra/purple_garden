@@ -10,11 +10,10 @@ from sys import exit, argv
 
 # Other imports
 import re
-import warnings
 import webbrowser
 import pytweening as tween
 from enum import IntEnum
-from math import log2, sqrt
+from math import inf, log2, sqrt
 from numpy import array, ndarray
 from numpy.linalg import norm
 from collections import deque
@@ -43,6 +42,8 @@ def debug_call(cls: Callable, dbg_alt: Callable = None):
         return cls
 
 # Decorator
+
+
 def debug_method(dbg_alt: Callable = None):
     '''Decorador que faz o redirecionamento de uma função quando em modo de debug.'''
     def inner_function(function):
@@ -103,7 +104,6 @@ class Entity:
             '''Lançado ao tentar desconectar um sinal de um objeto que não é observador'''
             pass
 
-        # Permitir kwargs?
         def connect(self, owner, observer, method: Callable, *args) -> None:
             '''Conecta o sinal ao método indicado. O mesmo será chamado quando o nó for emitido.'''
             if owner != self.owner:
@@ -126,6 +126,10 @@ class Entity:
             if self._observers.pop(observer) == None:
                 raise Entity.Signal.NotConnected
 
+        def disconnect_all(self, owner) -> None:
+            for observer, _ in self._observers:
+                self.disconnect(owner, observer)
+
         def emit(self, *args) -> None:
             '''Emite o sinal, propagando chamadas aos métodos conectados.
             Os argumentos passados para as funções conectadas são, respectivamente:
@@ -144,8 +148,8 @@ class Entity:
         def __init__(self, owner, name: str) -> None:
             self.owner = owner
             self.name = name
-            self._observers: dict[Entity, tuple[Callable, ]] = {}
             self._is_emitting: bool = False
+            self._observers: dict[Entity, tuple[Callable, ]] = {}
             self._cache_disconnections: deque[tuple[Node, Node]] = deque()
 
     # Decorador
@@ -212,12 +216,18 @@ class Entity:
         '''Retorna o tamanho/espaço da célula que envolve o nó.'''
         return VECTOR_ZERO
 
-    def connect(self, signal, observer, method, *args) -> None:
+    def connect(self, signal, observer, method: Callable, *args) -> None:
         '''Realiza a conexão de um sinal que pertence ao nó.'''
         try:
             signal.connect(self, observer, method, *args)
         except Entity.Signal.NotOwner:
             raise Entity.SignalNotExists
+
+    def connects(self, observer, connections: tuple[Signal, Callable, list]) -> None:
+        '''Um método de atalho para realizar múltiplas conexões num mesmo alvo.'''
+
+        for signal, method, args in connections:
+            self.connect(signal, observer, method, *args)
 
     def disconnect(self, signal: Signal, observer) -> None:
         '''Desconecta um sinal pertencente ao nó.'''
@@ -345,6 +355,12 @@ class Node(Entity):
     def free(self) -> None:
         if self._parent is not None:
             self._parent.remove_child(self)
+
+        # Faz uma cópia pois o vetor será esvaziado durante a iteração.
+        children: list[Node] = self._children_index.copy()
+        for child in children:
+            child.free()
+        
         self.freed.emit(self)
 
     def get_child(self, name: str = '', at: int = -1):
@@ -873,6 +889,23 @@ class Tween():
         self.tween_finished = Entity.Signal(self, 'tween_finished')
 
 
+class Timer():
+    '''Helper class to create time-sensitive events.'''
+    timeout: Node.Signal
+    elapsed_time: float = 0.0
+    target_time: float
+
+    def _process(self, delta: float) -> None:
+        self.elapsed_time += delta
+
+        if self.elapsed_time >= self.target_time:
+            self.timeout.emit(self)
+
+    def __init__(self, time: int) -> None:
+        self.target_time = time
+        self.timeout = Entity.Signal(self, 'timeout')
+
+
 class Control(Node):
     '''Nó Base para subtipos de Interface Gráfica do Usuário (GUI).'''
 
@@ -1018,6 +1051,7 @@ class VBox(Control):
         node: Node = super().remove_child(node=node, at=at)
 
         if self._children_index:
+            # FIXME
             for child in self._children_index:
                 self.size = max(self.size, (
                     child.get_cell()[Y] + self.padding[Y] + self.padding[H]) * self.anchor[Y])
@@ -1046,9 +1080,10 @@ class VBox(Control):
 
 class TextureSequence:
     '''Data Resource (apenas armazena os dados) para animações sequenciais simples.'''
+    DEFAULT_SPEED: float = 6.0  # frames/ sec
     frame: int = 0
     speed: float
-    DEFAULT_SPEED: float = 0.06
+    _textures: list[Surface]
 
     def add_spritesheet(self, texture: Surface, h_slice: int = 1, v_slice: int = 1,
                         coords: tuple[int, int] = VECTOR_ZERO,
@@ -1061,20 +1096,17 @@ class TextureSequence:
 
         for i in range(h_slice):
             for j in range(v_slice):
-                self.textures.append(texture.subsurface(
+                self._textures.append(texture.subsurface(
                     array(coords) + (i, j) * array(sprite_size), sprite_size))
 
     def add_texture(self, *paths: str) -> None:
 
         for path in paths:
-            self.textures.append(pygame.image.load(path))
+            self._textures.append(pygame.image.load(path))
 
     def set_textures(self, value: list[Surface]) -> None:
         self._textures = value
-        self.frame = 0
-
-    def get_textures(self) -> list[Surface]:
-        return self._textures
+        self.set_frame(0)
 
     def get_frames(self) -> int:
         return len(self._textures)
@@ -1083,40 +1115,67 @@ class TextureSequence:
         return self._textures[self.frame]
 
     def __init__(self, speed: float = DEFAULT_SPEED) -> None:
-        self._textures: list[Surface] = []
+        self._textures = []
         self.speed = speed
-
-    textures: list[Surface] = property(get_textures, set_textures)
+        self.textures: list[Surface] = property(
+            lambda _self: _self._textures, self.set_textures)
 
 
 class BaseAtlas(sprite.Sprite):
     '''Classe do PyGame responsável por gerenciar sprites e suas texturas.'''
     base_size: ndarray
+    rect: Rect
+    image: Surface
 
     def flip(self) -> None:
         self._flip_h = not self._flip_h
-        self._flip()
+        self._update_flipped()
 
-    def _flip(self) -> None:
+    def _update_flipped(self) -> None:
+        '''Atualiza a imagem com base em seu valor `_flip_h`.'''
         if self._flip_h:
-            if self._texture_left is None:
-                self._texture_left = transform.flip(self.image, True, False)
-            self.image = self._texture_left
+            self._set_rotated(self._angle, transform.flip(
+                self._base_texture, True, False))
         else:
-            self.image = self._texture_right
+            self._set_rotated(self._angle, self._base_texture)
+
+    def _set_rotated(self, angle: float, base_texture: Surface) -> None:
+        """Atualiza a imagem para uma textura base rotacionada mantendo o seu centro."""
+        # TODO -> Permitir a mudança do ponto âncora.
+        rect: Rect = base_texture.get_rect()
+
+        self._base_rect = rect
+        self._angle = angle
+        self.image = pygame.transform.rotate(base_texture, angle)
+        self.rect = self.image.get_rect(center=rect.center)
+        self.base_size = array(base_texture.get_size())
 
     def set_flip(self, value: bool) -> None:
         self._flip_h = value
-        self._flip()
+        self._update_flipped()
+
+    def set_base_texture(self, value: Surface) -> None:
+        self._base_texture = value
+        self._update_flipped()
+
+    def set_angle(self, value: float) -> None:
+        self._angle = value
+        self._update_flipped()
 
     def __init__(self) -> None:
         super().__init__()
         self.base_size = array(VECTOR_ZERO)
-        self._texture_right: Surface = None
-        self._texture_left: Surface = None
         self._flip_h: bool = False
+        self._angle: float = 0.0
+        self._base_rect: Rect = None
+        self._base_texture: Surface = None
 
-    flip_h: bool = property(lambda self: self._flip_h, set_flip)
+    flip_h: bool = property(
+        lambda _self: _self._flip_h, set_flip)
+    angle: float = property(
+        lambda _self: _self._angle, set_angle)
+    base_texture: Surface = property(
+        lambda _self: _self._base_texture, set_base_texture)
 
 
 class Icon(BaseAtlas):
@@ -1145,14 +1204,7 @@ class Icon(BaseAtlas):
 
     def set_texture(self, id: int) -> None:
         self.texture_id = id
-        self.image: Surface = self.textures[id]
-        self.rect = self.image.get_rect()
-        self.base_size = array(self.image.get_size())
-        self._texture_right = self.image
-        self._texture_left = None
-
-        if self._flip_h:
-            self._flip()
+        self.set_base_texture(self.textures[id])
 
     def __init__(self, textures: list[Surface]) -> None:
         super().__init__()
@@ -1160,48 +1212,75 @@ class Icon(BaseAtlas):
         self.set_texture(len(textures) - 1)
 
 
-class Atlas(BaseAtlas):
-    '''Atlas com uma única sequência simples de animação, ou único sprite estático.'''
-    sequence: TextureSequence
-    is_paused: bool = False
-
-    _static: bool = True
+class AtlasPage(BaseAtlas, ABC):
+    _is_static: bool = True
+    _is_paused: bool = False
+    _play: Callable[[], None] = NONE_CALL
     _current_time: float = 0.0
 
     def update(self) -> None:
+        self._play()
+
+    @abstractmethod
+    def _play_sequence(self) -> None:
         '''Processamento dos quadros da animação.'''
 
-        if self._static or self.is_paused:
-            return
+    @abstractmethod
+    def _update_frame(self) -> None:
+        '''Método auxiliar para atualizar um frame da animação.'''
 
-        self._current_time = (self._current_time +
-                              self.sequence.speed) % self.sequence.get_frames()
-        self.sequence.frame = int(self._current_time)
-        self.__update_frame()
+    def set_is_paused(self, value: bool) -> None:
+        self._is_paused = value
+        self._reset_play()
+
+    def _reset_play(self) -> None:
+        self._play = NONE_CALL if self._is_static or self._is_paused else self._play_sequence
+
+    @abstractmethod
+    def get_frame(self) -> int:
+        '''Retorna o frame atual da sequência sendo tocada.'''
+
+    @abstractmethod
+    def set_frame(self, value: int) -> None:
+        '''Determina o frame atual da sequência sendo tocada.'''
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.frame: int = property(self.get_frame, self.set_frame)
+        self.is_paused: bool = property(
+            lambda _self: _self._is_paused, self.set_is_paused)
+
+
+class AtlasPage(AtlasPage):
+    '''Atlas com uma única sequência simples de animação, ou único sprite estático.'''
+    sequence: TextureSequence
+
+    def _play_sequence(self) -> None:
+        global root
+        self._current_time = (
+            self._current_time + self.sequence.speed * root.delta)\
+            % self.sequence.get_frames()
+        new_frame: int = int(self._current_time)
+
+        if new_frame != self.sequence.frame:
+            # WATCH -> Prevenir frame skip?
+            self.sequence.frame = new_frame
+            self.set_base_texture(self.sequence.get_texture())
 
     def _update_frame(self) -> None:
-        '''Método auxiliar para atualização dos quadros.'''
 
         if self.sequence.textures:
-            self.__update_frame()
-
-    def __update_frame(self) -> None:
-        ''''Atualiza um frame da animação.'''
-        self.image: Surface = self.sequence.get_texture()
-        self.rect = self.image.get_rect()
-        self.base_size = array(self.image.get_size())
-        self._texture_right = self.image
-        self._texture_left = None
-
-        if self._flip_h:
-            self._flip()
+            self.set_base_texture(self.sequence.get_texture())
 
     def add_texture(self, *paths: str) -> None:
-        '''Adciona uma textura ao atlas.'''
+        '''Adiciona uma textura ao atlas.'''
         self.sequence.add_texture(paths)
 
         if self.sequence.get_frames() > 1:
-            self._static = False
+            self._is_static = False
+
+            if not self._is_paused:
+                self._play = self._play_sequence
 
         self._update_frame()
 
@@ -1213,7 +1292,10 @@ class Atlas(BaseAtlas):
             texture, h_slice, v_slice, coords, sprite_size)
 
         if self.sequence.get_frames() > 1:
-            self._static = False
+            self._is_static = False
+
+            if not self._is_paused:
+                self._play = self._play_sequence
 
         self._update_frame()
 
@@ -1226,7 +1308,8 @@ class Atlas(BaseAtlas):
 
     def set_textures(self, value: list[Surface]) -> None:
         self.sequence.textures = value
-        self._static = self.sequence.get_frames() <= 1
+        self._is_static = self.sequence.get_frames() <= 1
+        self._reset_play()
         self._update_frame()
 
     def get_textures(self) -> list:
@@ -1247,52 +1330,90 @@ class Atlas(BaseAtlas):
     def __init__(self) -> None:
         super().__init__()
         self.sequence = TextureSequence()
+        self.textures: list[Surface] = property(
+            self.get_textures, self.set_textures)
 
-    frame: int = property(get_frame, set_frame)
-    textures: list[Surface] = property(get_textures, set_textures)
 
-
-class AtlasBook(BaseAtlas):
+class AtlasBook(AtlasPage):
     '''Atlas composto por múltiplas animações de sprites.'''
-    is_paused: bool = False
     animations: dict[str, TextureSequence]
     _current_sequence: TextureSequence = None
 
-    _static: bool = True
-    _current_time: float = 0.0
-
-    def update(self) -> None:
+    def _play_sequence(self) -> None:
         '''Processamento dos quadros da animação.'''
-
-        if self._static or self.is_paused:
-            return
-
+        global root
         self._current_time = (
-            self._current_time + self._current_sequence.speed) % self._current_sequence.get_frames()
-        self._current_sequence.frame = int(self._current_time)
-        self.__update_frame()
+            self._current_time + self._current_sequence.speed *
+            root.delta) % self._current_sequence.get_frames()
+        new_frame: int = int(self._current_time)
+
+        if new_frame != self._current_sequence.frame:
+            # WATCH -> Prevenir frame-skip?
+            self._current_sequence.frame = new_frame
+            self.set_base_texture(self._current_sequence.get_texture())
 
     def _update_frame(self) -> None:
-        '''Método auxiliar para atualização dos quadros.'''
+        '''Método auxiliar para atualizar um frame da animação.'''
 
         if self._current_sequence.textures:
-            self.__update_frame()
+            self.set_base_texture(self._current_sequence.get_texture())
 
-    def __update_frame(self) -> None:
-        ''''Atualiza um frame da animação.'''
-        self.image: Surface = self._current_sequence.get_texture()
-        self.rect = self.image.get_rect()
-        self.base_size = array(self.image.get_size())
-        self._texture_right = self.image
-        self._texture_left = None
+    def _play_once(self) -> None:
+        '''Similar a `_play_sequence`, processa a animação, porém para ao atingir
+        o último frame da sequência (Muda para o estado "estático").'''
+        global root
+        new_time: float = self._current_time + self._current_sequence.speed * root.delta
+        new_frame: int = int(new_time)
+        frames: int = self._current_sequence.get_frames()
+        self._current_time = new_time
 
-        if self._flip_h:
-            self._flip()
+        if new_time >= self._time_event:
+            # Dispara um dos eventos de tempo da fila.
+            self._owner.anim_event_triggered.emit(self._time_event)
+            self._next_time_event()
+
+        # Paramos *após* o último quadro, para permitir o "delay" visual.
+        # Caso contrário ele apareceria por um único frame de jogo.
+        if new_frame == frames:
+            return
+        if new_frame > frames:
+            if self._owner:
+                self._owner.animation_finished.emit()
+            self._is_static = True
+            self._reset_play()
+            return
+
+        self._current_sequence.frame = new_frame
+        self.set_base_texture(self._current_sequence.get_texture())
+
+    def play_once(self, name: str, owner=None, time_events: deque[float] = None,
+                  from_time: float = 0.0) -> None:
+        '''Toca a animação determinada. ─ Veja: `set_current_animation`.
+        Opcionalmente recebe o `Sprite` associado a este atlas:
+            --> Quando a animação for finalizada emite o sinal
+            `animation_finished` no `owner` indicado;
+            --> O sinal `anim_event_triggered` será emitido no `owner`
+            sempre que um dos tempos de `time_events` forem atingidos.
+            Note que os tempos devem ser ordenados em
+            uma fila para funcionar devidamente.
+        # WATCH -> Usar frames/segundo?
+        Se `from_time` for indicado, começa a animação daquele ponto.
+            --> Note que a velocidade determina o tempo de passagem para cada
+            frame da animação. Logo o tempo total == `speed * frames`.
+        '''
+        self._current_time = from_time
+        self._current_sequence = self.animations[name]
+        self._current_sequence.frame = int(from_time)
+        self._owner = owner
+        self._play = self._play_once
+        self._update_frame()
+        self._time_events = time_events
+        self._next_time_event()
 
     def add_animation(self, name: str, texture: Surface, h_slice: int = 1, v_slice: int = 1,
                       coords: tuple[int, int] = VECTOR_ZERO, sprite_size: tuple[int, int] = None,
                       speed: float = TextureSequence.DEFAULT_SPEED) -> None:
-        '''Adciona uma animação ao atlas, com base em uma spritesheet
+        '''Adiciona uma animação ao atlas, com base em uma spritesheet
         (aplicando o fatiamento indicado).'''
         sequence: TextureSequence = TextureSequence(speed)
         sequence.add_spritesheet(
@@ -1301,7 +1422,10 @@ class AtlasBook(BaseAtlas):
         self._current_sequence = sequence
 
         if sequence.get_frames() > 1:
-            self._static = False
+            self._is_static = False
+
+            if not self._is_paused:
+                self._play = self._play_sequence
 
         self._update_frame()
 
@@ -1321,7 +1445,8 @@ class AtlasBook(BaseAtlas):
         não for encontrada resultará em erro.'''
 
         self._current_sequence = self.animations[name]
-        self._static = self._current_sequence.get_frames() <= 1
+        self._is_static = self._current_sequence.get_frames() <= 1
+        self._reset_play()
         self._update_frame()
 
     def set_frame(self, value: int) -> None:
@@ -1336,11 +1461,15 @@ class AtlasBook(BaseAtlas):
     def get_frame(self) -> int:
         return self._current_sequence.frame
 
+    def _next_time_event(self) -> None:
+        self._time_event = self._time_events.popleft() if self._time_events else inf
+
     def __init__(self) -> None:
         super().__init__()
         self.animations = {}
-
-    frame: int = property(get_frame, set_frame)
+        self._owner: Sprite = None
+        self._time_event: float = inf
+        self._time_events: deque[float] = deque()
 
 
 class Sprite(Node):
@@ -1348,6 +1477,8 @@ class Sprite(Node):
     (que pode ser inserido na árvore da cena).'''
     atlas: BaseAtlas
     group: str
+    animation_finished: Node.Signal
+    anim_event_triggered: Node.Signal
 
     def _enter_tree(self) -> None:
         global root
@@ -1383,12 +1514,14 @@ class Sprite(Node):
                  atlas: BaseAtlas = None) -> None:
         global root
         super().__init__(name=name, coords=coords)
+        self.animation_finished = Node.Signal(self, 'animation_finished')
+        self.anim_event_triggered = Node.Signal(self, 'anim_event_triggered')
 
         # REFACTOR -> Tornar o tipo de atlas mandatório, ou alterar o tipo default para `AtlasBook`.`
         if atlas:
             self.atlas = atlas
         else:
-            self.atlas = Atlas()
+            self.atlas = AtlasPage()
 
         self.group = root.DEFAULT_GROUP
 
@@ -2551,6 +2684,11 @@ class RichTextLabel(Control):
         '''Faz o processamento da string via conversão de tags (parser)
         para renderizá-la numa caixa de texto inteligente.'''
 
+        # Limpa o conteúdo atual
+        children: list[Node] = self._children_index.copy()
+        for child in children:
+            child.free()
+
         txt: str = ''.join(text)
         metadata: deque[dict[str, ]] = deque()
 
@@ -2687,6 +2825,7 @@ class Button(BaseButton):
     def _on_Label_text_changed(self) -> None:
         self.size = array(self.label.size) + array(self._padding) * 2
         self.panel.size = self.size
+        self._update_rect()
 
     def __init__(self, font: font.Font, name: str = 'BaseButton',
                  coords: tuple[int, int] = VECTOR_ZERO, anchor: tuple[int, int] = TOP_LEFT,
@@ -2761,6 +2900,7 @@ class PhysicsServer():
 
     def _on_Body_freed(self, _type: type[Body], body: Body) -> None:
         '''Remove um nó dos registros do espaço físico.'''
+        # WATCH -> Adicionar uma fila de remoção para prevenir bugs?
         _PS: type = PhysicsServer.PhysicsSpace
         layers: list[int] = PhysicsServer.get_bitflags(body.collision_layer)
         masks: list[int] = PhysicsServer.get_bitflags(body.collision_mask)
@@ -2930,6 +3070,8 @@ class SceneTree(CanvasLayer):
 
     # Tweening
     _active_tweens: list[Tween] = []
+    # Timings
+    _active_timers: list[Timer] = []
 
     _instance = None
     tree_pause: int = 0
@@ -2971,7 +3113,8 @@ class SceneTree(CanvasLayer):
             self.clock.tick(self.fixed_fps)
             factor_fps: float = self.clock.get_fps() / self.fixed_fps
             self.factor_fps = factor_fps
-            self.delta = factor_fps / 60.0
+            delta = factor_fps / 60.0
+            self.delta = delta
 
             self.screen.fill(self.screen_color)
             # Preenche a tela
@@ -2980,9 +3123,13 @@ class SceneTree(CanvasLayer):
             if input._tick():
                 self._input()
 
+            # Processa os timers ativos na lista
+            for timer in self._active_timers:
+                timer._process(delta)
+
             # Processa os tweens ativos na lista
             for tween in self._active_tweens:
-                tween._process(self.delta)
+                tween._process(delta)
 
             self._propagate()
             # Propaga o processamento
@@ -3001,7 +3148,7 @@ class SceneTree(CanvasLayer):
             bool((pause_mode ^ self.pause_mode) & Node.PauseModes.TREE_PAUSED))
 
     def add_to_group(self, node: Node, group: str) -> None:
-        '''Adciona o nó a um grupo determinado.
+        '''Adiciona o nó a um grupo determinado.
         Se o grupo não existir, cria um novo.'''
 
         if node in node._current_groups:
@@ -3045,6 +3192,16 @@ class SceneTree(CanvasLayer):
 
         node._set_is_on_focus(True)
         self._current_focus = node
+
+    def _on_Timer_timeout(self, timer: Timer) -> None:
+        timer.timeout.disconnect_all(timer)
+        self._active_timers.remove(timer)
+
+    def create_timer(self, time: float, node: Node, callback: Callable, *args) -> None:
+        timer: Timer = Timer(time)
+        self._active_timers.append(timer)
+        timer.timeout.connect(timer, self, self._on_Timer_timeout)
+        timer.timeout.connect(timer, node, callback, *args)
 
     @Node.debug()
     def log(self, message: str) -> None:

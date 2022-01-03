@@ -116,6 +116,9 @@ def main(*args) -> None:
     spritesheet: Surface = pygame.image.load(
         path.join(SPRITES_DIR, 'sheet1.png')
     )
+    title_screen: Surface = pygame.image.load(
+        path.join(SPRITES_DIR, 'title_screen.png')
+    )
 
     # Sound Streams
     sound_fxs: dict[str, Sound] = {}
@@ -126,8 +129,8 @@ def main(*args) -> None:
     # Sets the first scene.
     root.current_scene = debug_call(
         lambda: TitleScreen(
-            spritesheet, spritesheet_data, sound_fxs,
-            DEFAULT_FONT, GUI_FONT, TITLE_FONT),
+            title_screen, spritesheet, spritesheet_data,
+            sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT),
         lambda: GameWorld(
             spritesheet, spritesheet_data,
             sound_fxs, DEFAULT_FONT, GUI_FONT)

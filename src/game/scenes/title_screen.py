@@ -1,5 +1,6 @@
 from pygame.mixer import Sound
 from src.core.nodes import *
+from src.core.lib.colors import BLUE, GREEN, RED, WHITE
 from .game_world import GameWorld
 
 
@@ -29,7 +30,7 @@ class TitleScreen(Node):
 
     on_focus: bool = True
     credits: Popup
-    tuto: Popup
+    tuto: PopupDialog
     current_focus: Popup = None
 
     def _enter_tree(self) -> None:
@@ -118,6 +119,7 @@ class TitleScreen(Node):
         self.credits_button.label.set_text(root.tr('CREDITS'))
         self.exit_button.label.set_text(root.tr('EXIT'))
         self.info_label.set_text(root.tr('INFOS')[self.selected_button])
+        self.tuto.set_text(*root.tr('INFO_TXT'))
         self.on_focus = True
 
     def _on_Button_focus_changed(self, button_id: int, value: bool) -> None:
@@ -126,10 +128,10 @@ class TitleScreen(Node):
             self.selected_button = button_id
             self.info_label.text = self.info[button_id]
 
-    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
-                 sound_fxs: dict[str, Sound], default_font: font.Font, gui_font: font.Font,
-                 title_font: font.Font, name: str = 'TitleScreen',
-                 coords: tuple[int, int] = VECTOR_ZERO) -> None:
+    def __init__(self, title_screen: Surface, spritesheet: Surface,
+                 spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
+                 default_font: font.Font, gui_font: font.Font, title_font: font.Font,
+                 name: str = 'TitleScreen', coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
         self.spritesheet = spritesheet
         self.spritesheet_data = spritesheet_data
@@ -138,12 +140,19 @@ class TitleScreen(Node):
         self.gui_font = gui_font
         self.buttons = []
         self.info = root.tr('INFOS')
+        purple: Color = Color('#6E34B7')
 
-        root.screen_color = Color('#6E34B7')
+        # Title Screen
+        # root.screen_color = Color('#6E34B7')
+        bg: Sprite = Sprite('TitleScreen', atlas=Icon([title_screen]))
+        bg.set_anchor(array(TOP_LEFT))
+        # bg.scale = array(VECTOR_ONE)
+        self.add_child(bg)
 
         Y_OFFSET: tuple = (0, 55)
-        title: Label = Label(title_font, name='Title', coords=(array(
-            root.screen_size) // 2) - array(Y_OFFSET) * 3, color=colors.WHITE, text='Purple Garden')
+        title: Label = Label(title_font, name='Title', coords=(
+            array(root.screen_size) // 2) - array(Y_OFFSET) * 3,
+            color=purple, text='Purple Garden')
         title.anchor = array(CENTER)
         copyright_label: Label = Label(gui_font, name='Copyright', coords=(
             root._screen_width // 2, root._screen_height - Y_OFFSET[Y]), color=colors.GRAY,
@@ -153,10 +162,18 @@ class TitleScreen(Node):
                                   color=colors.CYAN, text=root.tr('PRESS_TO_PLAY'))
         info_label.anchor = array(CENTER)
         self.info_label = info_label
+        info_label.color = purple
 
+        # h_box: HBox = HBox(name='Buttons', coords=array(
+        #     root.get_screen_size()) // 2 + Y_OFFSET)
+        # h_box.anchor = array(CENTER)
+
+        # start_button: Button = Button(
+        #     default_font, name=root.tr('START'), text=START)
         start_button: Button = Button(
             default_font, name='StartButton', coords=title.position +
             array(Y_OFFSET) * 2, anchor=CENTER, text=root.tr('START'))
+
         start_button.is_on_focus = True
         self.start_button = start_button
         self.selected_button = 0
@@ -223,6 +240,15 @@ class TitleScreen(Node):
         info_popup.set_text(*root.tr('INFO_TXT'))
         info_popup.connect(info_popup.hided, self, self._on_Popup_hidden)
         self.tuto = info_popup
+
+        for button in self.buttons:
+            button.focus_color = purple.lerp(GREEN, .5)
+            button.normal_color = purple
+            button.panel.bg.color = purple
+            button.highlight_color = purple.lerp(BLUE, .5)
+            button.pressed_color = purple.lerp(Color(255, 100, 0), .5)
+            button.label.color = WHITE
+            button.panel.borders.color = WHITE
 
         input.register_event(
             self, KEYDOWN, K_UP, TitleScreen.Events.KEY_UP_EVENT)

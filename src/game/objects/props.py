@@ -4,7 +4,7 @@ from src.core.nodes import *
 
 
 def make_sprite(spritesheet: Surface, spritesheet_data: dict[str, list[dict]], color: Color, name='Sprite') -> Sprite:
-    atlas: Atlas = Atlas()
+    atlas: AtlasPage = AtlasPage()
     sprite: Sprite = Sprite(atlas=atlas, name=name)
     animation_slice(spritesheet, spritesheet_data, color, atlas)
     return sprite

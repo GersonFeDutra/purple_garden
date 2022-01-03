@@ -2,7 +2,7 @@ from typing import Union
 from pygame import Color, Surface, Vector2
 from numpy import array
 from math import sqrt
-from src.core.nodes import Area, Atlas, AtlasBook, Icon
+from src.core.nodes import Area, AtlasPage, AtlasBook, Icon, Node
 from src.core.lib.utils import push_warning
 from src.core.lib.vectors import VECTOR_ZERO, X, Y
 
@@ -10,7 +10,7 @@ _NUMBER: type[Union[int, float]] = Union[int, float]
 
 
 def animation_slice(
-        spritesheet: Surface, data: dict[str, list[dict]], tag: Color, atlas: Atlas) -> None:
+        spritesheet: Surface, data: dict[str, list[dict]], tag: Color, atlas: AtlasPage) -> None:
     '''Cria as animações do atlas com base nos dados da spritesheet.'''
     slices: list[dict] = data.get(str(tag))
 
@@ -74,7 +74,7 @@ def get_distance(a: tuple[_NUMBER], b: tuple[_NUMBER]) -> float:
     dx: int = a[X] - b[X]
     dy: int = a[Y] - b[Y]
     return sqrt(dx * dx + dy * dy)
-    
+
 
 class SpriteSheetLoadError(Warning):
     '''Fail loading SpriteSheet. Color code do not match.'''
@@ -115,11 +115,12 @@ class Steering():
         return velocity + steering
 
 
-
 class HitBox(Area):
     strength: int = 1
-    # WATCH
     
+    def hit(self) -> int:
+        return self.strength
+
     def __init__(self, mask: int, name: str = 'HitBox', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color(145, 11, 145)) -> None:
         super().__init__(name=name, coords=coords, color=color)
@@ -128,18 +129,32 @@ class HitBox(Area):
 
 
 class HurtBox(Area):
-    health: int = 0
-    
-    def _on_HitBox_entered(self, body: Area) -> None:
-        # WATCH
-        # self.health -= body.has_shape
-        return
-    
+    health_depleated: Node.Signal
+    hitted: Node.Signal
+    health: int
+
+    def _on_HitBox_entered(self, body: HitBox) -> None:
+        try:
+            damage: int = body.hit()
+            self.health -= damage
+            self.hitted.emit(damage)
+        except NameError:
+            push_warning(f'{body} body is not a `HitBox`.')
+
+        if self.health > 0:
+            return
+
+        self.health_depleated.emit()
+
     def __init__(self, layer: int, name: str = 'HurtBox', coords: tuple[int, int] = VECTOR_ZERO,
-                color: Color = Color(145, 11, 11)) -> None:
+                 color: Color = Color(145, 11, 11), health: int = 1) -> None:
         super().__init__(name=name, coords=coords, color=color)
-        self.connect(self.body_entered, self._on_HitBox_entered, self._on_HitBox_entered)
+        self.hitted = Node.Signal(self, 'hitted')
+        self.health_depleated = Node.Signal(self, 'health_depleated')
+
+        self.health = health
         self.collision_layer = layer
         self.collision_mask = 0
 
-
+        self.connect(self.body_entered, self._on_HitBox_entered,
+                     self._on_HitBox_entered)

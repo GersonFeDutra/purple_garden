@@ -24,3 +24,4 @@ class PhysicsLayers(IntEnum):
     PLAYER_HITBOX: int = 2
     PLAYER_BODY: int = 4
     PLANTS_VIEW: int = 8
+    NATIVES_VIEW: int = 16
