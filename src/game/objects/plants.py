@@ -121,6 +121,10 @@ class Plant(Area, ABC):
                 self.animation_attack, self.sprite, deque([self._atk_anim_trigger]))
 
     def _back_shooting(self) -> None:
+        '''Estado em que a planta está de costas.'''
+        if len(self.view_range._last_colliding_bodies) == 0:
+            return
+
         target: Node = self._get_nearest_target()
         timer: Timer = self._timer
         self._turn_to(target)

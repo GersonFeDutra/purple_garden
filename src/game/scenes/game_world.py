@@ -141,8 +141,8 @@ class Level(Node):
 
     def _dbg_spawn_native(self, offset: tuple[int, int] = DEFAULT_OFFSET) -> None:
 
-        if self.spawns >= 1:
-            return
+        # if self.spawns >= 1:
+        #     return
 
         self._spawn_native(array(self.bg.map_size) // 3)
 

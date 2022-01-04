@@ -122,6 +122,13 @@ class Player(Char):
 
 
 class Native(Char):
+    class States(IntEnum):
+        WALK: int = 0
+        ATK_SHIP_CHARGE: int = 1
+        FINISHING_SHIP_ATK: int = 2
+        TAKING_DAMAGE: int = 4
+        ATTACKING: int = 8
+
     atk: int
     final_target_pos: tuple[int, int]
     target_pos: tuple[int, int]
@@ -134,7 +141,11 @@ class Native(Char):
 
     _damage_anim_duration: float
     _is_flipped: bool = False
+    _state: int = States.WALK
+    _last_state: int = _state
     _timer: Timer = None
+    _knock_timer: Timer = None
+    _cached_move: Callable[[float], None]
 
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float], offset: tuple[int, int]) -> None:
         return super()._draw(target_pos, target_scale, offset)
@@ -163,7 +174,7 @@ class Native(Char):
     def _knockback(self, _factor: float) -> None:
         # self.move_and_collide(Vector2(*VECTOR_ZERO))
         # super()._physics_process(factor)
-        self._timer._process(root.delta)
+        self._knock_timer._process(root.delta)
 
     def set_target(self, value: Node) -> None:
         self._current_target = value
@@ -172,12 +183,15 @@ class Native(Char):
     def _on_Body_collided(self, body: Body) -> None:
 
         if body.name == 'Ship':
+            # Configura o ataque
             self.move = NONE_CALL
+            self._cached_move = self.move
             self._attack_ship(body)
             self.disconnect(self.body_entered, self)
 
     def _attack_ship(self, ship: Ship) -> None:
         '''Inicia a animação de ataque contra o navio.'''
+        self._state = Native.States.ATK_SHIP_CHARGE
         self.target = ship
         self.animations.play_once(
             self.animation_attack, self.sprite, deque([self.animations.animations[self.animation_attack].get_frames() / 2.0]))
@@ -185,6 +199,7 @@ class Native(Char):
                             self, self._on_Anim_event_triggered, ship)
 
     def _on_Anim_event_triggered(self, ship: Ship, time: float) -> None:
+        self._state = Native.States.FINISHING_SHIP_ATK
         ship.durability -= self.atk
         self.sprite.disconnect(self.sprite.anim_event_triggered, self)
         self.sprite.connect(self.sprite.animation_finished,
@@ -199,30 +214,63 @@ class Native(Char):
                 self._attack_ship(body)
                 return
 
+        self._state = Native.States.WALK
         self.connect(self.body_entered, self, self._on_Body_collided)
-        self.move = self._move
+        self.move = self._cached_move
 
-    def _on_Timer_timeout(self, move: Callable[[float], None], animation: str, timer: Timer) -> None:
+    def _on_KnockTimer_timeout(self, animation: str, timer: Timer) -> None:
+        # Tempo de dano acabou
         atlas: AtlasBook = self.sprite.atlas
+        last_state: int = self._last_state
+
+        # Retorna para o estado anterior
         atlas.set_current_animation(animation)
         timer.timeout.disconnect(timer, self)
-        self.move = move
-        self._timer = None
-        # Retorna para o estado anterior
+        self._last_state = Native.States.TAKING_DAMAGE
+
+        if last_state & (Native.States.ATK_SHIP_CHARGE | Native.States.FINISHING_SHIP_ATK):
+            for body in self._last_colliding_bodies:
+                if body.name == 'Ship':
+                    self._attack_ship(body)
+                    return
+
+            # Reabilita as colisões
+            self.connect(self.body_entered, self, self._on_Body_collided)
+        else:
+            self._state = Native.States.WALK
+            self.move = self._cached_move
 
     def _on_hurtted(self, _strength: int) -> None:
+        def discharge() -> None:
+            nonlocal self
+            self.sprite.disconnect(self.sprite.anim_event_triggered, self)
 
-        if self._timer is None:
-            atlas: AtlasBook = self.sprite.atlas
-            atlas.set_current_animation(self.animation_damage)
-            timer: Timer = Timer(self._damage_anim_duration)
-            self._timer = timer
-            self._timer.timeout.connect(
-                self._timer, self, self._on_Timer_timeout, self.move, self.animation_walk)
-            self.move = self._knockback
-        else:
-            # Reseta o timer
-            self._timer.elapsed_time = 0.0
+        def finish_already() -> None:
+            nonlocal self
+            self.sprite.disconnect(self.sprite.animation_finished, self)
+
+        def reset_timer() -> None:
+            nonlocal self
+            self._knock_timer.elapsed_time = 0.0
+
+        self._last_state = self._state
+        STATE_TABLE: dict[int, Callable[[], None]] = {
+            Native.States.ATK_SHIP_CHARGE: discharge,
+            Native.States.FINISHING_SHIP_ATK: finish_already,
+            Native.States.TAKING_DAMAGE: reset_timer,
+        }
+
+        STATE_TABLE.get(self._state, NONE_CALL)()
+
+        atlas: AtlasBook = self.sprite.atlas
+        atlas.set_current_animation(self.animation_damage)
+        timer: Timer = Timer(self._damage_anim_duration)
+
+        self._knock_timer = timer
+        self.move = self._knockback
+        self._knock_timer.timeout.connect(
+            self._knock_timer, self, self._on_KnockTimer_timeout, self.animation_walk)
+        self._state = Native.States.TAKING_DAMAGE
 
     def _on_health_depleated(self) -> None:
         self.free()
@@ -243,7 +291,10 @@ class Native(Char):
         self.animation_walk = animation_move
         self.animation_damage = animation_damage
         self.animation_attack = animation_attack
+
         self._current_target: Node = None
+        self._cached_move = self._move
+
         animations: AtlasBook = self.sprite.atlas
         self.animations = animations
         damage_sequence: TextureSequence = animations.animations[animation_damage]
