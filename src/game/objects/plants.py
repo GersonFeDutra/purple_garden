@@ -72,10 +72,14 @@ class Plant(Area, ABC):
     _atk_anim_trigger: float
     _stage_triggers: list[float] = None
     _timer: Timer
+    _health: int = 33
 
     def _process(self) -> None:
         self.process_state()
-
+    
+    def take_damage(self, value: int) -> None:
+        self.set_health(self._health - value)
+    
     def _growing(self) -> None:
         self._grow_progress += root.delta
 
@@ -134,6 +138,7 @@ class Plant(Area, ABC):
             sprite: Sprite = self.sprite
             timer = self._timer
             timer.timeout.disconnect(timer, self)
+            self.process_state = self._idling
 
             if timer.elapsed_time < self._atk_anim_trigger:
                 sprite.connect(sprite.anim_event_triggered, self,
@@ -142,7 +147,7 @@ class Plant(Area, ABC):
                     [self._atk_anim_trigger]), timer.elapsed_time)
             else:
                 sprite.connect(sprite.animation_finished, self,
-                            self._on_Sprite_animation_finished)
+                               self._on_Sprite_animation_finished)
 
     def _grow_up(self) -> None:
         self.sprite.atlas = self.animations
@@ -201,9 +206,16 @@ class Plant(Area, ABC):
         if shots == 1:
             self._shoot(self._get_nearest_target())
             self._timer = Timer(timer.target_time)
-            self._timer.timeout.connect(self._timer, self, self._on_Timer_timeout, 2)
+            self._timer.timeout.connect(
+                self._timer, self, self._on_Timer_timeout, 2)
         elif shots == 2:
             self.process_state = self._idling
+
+    def set_health(self, value: int) -> None:
+        self._health = value
+
+        if value <= 0:
+            self.free()
 
     def __init__(self, color: Color, growing_color: Color, spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], animation_idle: str,
@@ -211,7 +223,7 @@ class Plant(Area, ABC):
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords, color=color)
         self.collision_layer = PhysicsLayers.PLAYER_BODY
-        self.collision_mask = PhysicsLayers.NATIVES_VIEW
+        self.collision_mask = PhysicsLayers.NATIVES_VIEW | PhysicsLayers.NATIVES_HITBOX
 
         atlas: Icon = Icon(get_icon_sequence_slice(
             spritesheet, spritesheet_data, color, 0))
@@ -230,7 +242,7 @@ class Plant(Area, ABC):
                           growing_color, animations)
         atk_anim_speed: float = Plant.ATK_ANIM_SPEED
         animations.animations[animation_atk].speed = atk_anim_speed
-        self._atk_anim_trigger = 4.0 # Ativa no frame 4
+        self._atk_anim_trigger = 4.0  # Ativa no frame 4
         self.animations = animations
 
         # Set the view
@@ -251,6 +263,8 @@ class Plant(Area, ABC):
         self.add_child(shape)
         shape.add_child(view_range)
         shape.add_child(sprite)
+
+    health: int = property(lambda _self: _self.health, set_health)
 
 
 class Rose(Plant):

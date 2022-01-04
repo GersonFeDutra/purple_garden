@@ -2,7 +2,7 @@ from pygame.mixer import Sound
 from random import randint
 from src.core.nodes import *
 from ..consts import *
-from ..utils import HurtBox, Steering, spritesheet_slice
+from ..utils import HurtBox, Steering, get_distance, spritesheet_slice
 from .plants import Plant, Rose, Violet
 from .props import Ship
 
@@ -47,6 +47,9 @@ class Player(Char):
     hand_items: list[type[Plant]] = [Rose, Violet]
     _start_position: tuple[int, int]
 
+    max_o2: int = 100
+    o2: int = 50
+
     def _physics_process(self, factor: float) -> None:
         self.sprite.atlas.set_flip(int(self._velocity[X] < 0))
         self.move_and_collide(self._velocity * self.speed)
@@ -78,6 +81,9 @@ class Player(Char):
     def set_points(self, value) -> None:
         self._points = value
         self.points_changed.emit(f'Points: {value}')
+
+    def take_damage(self, value: int) -> None:
+        self.o2 -= value
 
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  death_sfx: Sound, coords: tuple[int, int] = VECTOR_ZERO) -> None:
@@ -124,10 +130,9 @@ class Player(Char):
 class Native(Char):
     class States(IntEnum):
         WALK: int = 0
-        ATK_SHIP_CHARGE: int = 1
-        FINISHING_SHIP_ATK: int = 2
+        ATK_CHARGE: int = 1
+        FINISHING_ATK: int = 2
         TAKING_DAMAGE: int = 4
-        ATTACKING: int = 8
 
     atk: int
     final_target_pos: tuple[int, int]
@@ -138,6 +143,8 @@ class Native(Char):
     move: Callable[[float], None]
     animations: AtlasBook
     target: Node = None
+    atk_box: Area
+    view_range: Area
 
     _damage_anim_duration: float
     _is_flipped: bool = False
@@ -154,14 +161,14 @@ class Native(Char):
         self.move(factor)
 
     def _follow(self, factor: float) -> None:
-        self._velocity = Steering.follow(Vector2(
-            *self._velocity), Vector2(*self._global_position), Vector2(*self.final_target_pos))
-        self.move_and_collide(self._velocity * self.speed)
-        super()._physics_process(factor)
+        self._go_to(factor, *self.target_pos)
 
     def _move(self, factor: float) -> None:
+        self._go_to(factor, *self.final_target_pos)
+
+    def _go_to(self, factor: float, x: int, y: int) -> None:
         self._velocity = Steering.follow(Vector2(
-            *self._velocity), Vector2(*self._global_position), Vector2(*self.target_pos))
+            *self._velocity), Vector2(*self._global_position), Vector2(x, y))
         is_flipped: bool = self._velocity.x > 0.0
 
         if self._is_flipped != is_flipped:
@@ -180,27 +187,27 @@ class Native(Char):
         self._current_target = value
         self.move = self._move if value is None else self._follow
 
-    def _on_Body_collided(self, body: Body) -> None:
+    def attack(self, body: Body) -> None:
+        assert isinstance(body, Ship) or isinstance(
+            body, Plant) or isinstance(body, Player)
+        # Configura o ataque
+        self.move = NONE_CALL
+        self._cached_move = self.move
+        self._attack(body)
+        self.disconnect(self.body_entered, self)
 
-        if body.name == 'Ship':
-            # Configura o ataque
-            self.move = NONE_CALL
-            self._cached_move = self.move
-            self._attack_ship(body)
-            self.disconnect(self.body_entered, self)
+    def _attack(self, target: Union[Ship, Plant, Player]) -> None:
+        '''Inicia a animação de ataque.'''
+        self._state = Native.States.ATK_CHARGE
+        self.target = target
+        self.animations.play_once(self.animation_attack, self.sprite, deque(
+            [self.animations.animations[self.animation_attack].get_frames() / 2.0]))
+        self.sprite.connect(self.sprite.anim_event_triggered, self,
+                            self._on_Anim_event_triggered, target)
 
-    def _attack_ship(self, ship: Ship) -> None:
-        '''Inicia a animação de ataque contra o navio.'''
-        self._state = Native.States.ATK_SHIP_CHARGE
-        self.target = ship
-        self.animations.play_once(
-            self.animation_attack, self.sprite, deque([self.animations.animations[self.animation_attack].get_frames() / 2.0]))
-        self.sprite.connect(self.sprite.anim_event_triggered,
-                            self, self._on_Anim_event_triggered, ship)
-
-    def _on_Anim_event_triggered(self, ship: Ship, time: float) -> None:
-        self._state = Native.States.FINISHING_SHIP_ATK
-        ship.durability -= self.atk
+    def _on_Anim_event_triggered(self, target: Union[Ship, Plant, Player], _time: float) -> None:
+        self._state = Native.States.FINISHING_ATK
+        target.take_damage(self.atk)
         self.sprite.disconnect(self.sprite.anim_event_triggered, self)
         self.sprite.connect(self.sprite.animation_finished,
                             self, self._on_Anim_event_finished)
@@ -208,14 +215,20 @@ class Native(Char):
     def _on_Anim_event_finished(self) -> None:
         self.sprite.disconnect(self.sprite.animation_finished, self)
 
-        # Reinicia a animação
+        # Reinicia a animação.
+        # Note que alguns sinais de colisão redirecionam para o método `attack()`.
         for body in self._last_colliding_bodies:
-            if body.name == 'Ship':
-                self._attack_ship(body)
-                return
+            # Ataca o navio.
+            self._attack(body)
+            return
+
+        for body in self.atk_box._last_colliding_bodies:
+            # Ataca um dos corpos colisores (planta ou jogador).
+            self._attack(body)
+            return
 
         self._state = Native.States.WALK
-        self.connect(self.body_entered, self, self._on_Body_collided)
+        self.connect(self.body_entered, self, self.attack)
         self.move = self._cached_move
 
     def _on_KnockTimer_timeout(self, animation: str, timer: Timer) -> None:
@@ -228,14 +241,21 @@ class Native(Char):
         timer.timeout.disconnect(timer, self)
         self._last_state = Native.States.TAKING_DAMAGE
 
-        if last_state & (Native.States.ATK_SHIP_CHARGE | Native.States.FINISHING_SHIP_ATK):
+        if last_state & (Native.States.ATK_CHARGE | Native.States.FINISHING_ATK):
+            # Reinicia a animação.
+            # Note que alguns sinais de colisão redirecionam para o método `attack()`.
             for body in self._last_colliding_bodies:
-                if body.name == 'Ship':
-                    self._attack_ship(body)
-                    return
+                # Ataca o navio.
+                self._attack(body)
+                return
+
+            for body in self.atk_box._last_colliding_bodies:
+                # Ataca um dos corpos colisores (planta ou jogador).
+                self._attack(body)
+                return
 
             # Reabilita as colisões
-            self.connect(self.body_entered, self, self._on_Body_collided)
+            self.connect(self.body_entered, self, self.attack)
         else:
             self._state = Native.States.WALK
             self.move = self._cached_move
@@ -255,8 +275,8 @@ class Native(Char):
 
         self._last_state = self._state
         STATE_TABLE: dict[int, Callable[[], None]] = {
-            Native.States.ATK_SHIP_CHARGE: discharge,
-            Native.States.FINISHING_SHIP_ATK: finish_already,
+            Native.States.ATK_CHARGE: discharge,
+            Native.States.FINISHING_ATK: finish_already,
             Native.States.TAKING_DAMAGE: reset_timer,
         }
 
@@ -275,8 +295,32 @@ class Native(Char):
     def _on_health_depleated(self) -> None:
         self.free()
 
-    def _on_Area_enter_view(self, area: Area) -> None:
-        self.target_pos = area._global_position
+    def _on_Area_enter_view(self, _area: Area) -> None:
+        self._change_target()
+
+    def _on_Area_exit_view(self, _area: Area) -> None:
+
+        if self.view_range._colliding_bodies:
+            self._change_target()
+        else:
+            self.move = self._move
+
+    def _change_target(self) -> None:
+        target: Body = self.view_range._colliding_bodies[0]
+        target_distance: float = get_distance(
+            self._global_position, target._global_position)
+
+        for body in self.view_range._colliding_bodies[1:]:
+            distance: float = get_distance(
+                self._global_position, body._global_position)
+
+            if distance < target_distance:
+                target_distance = distance
+                target = body
+
+        self.target = target
+        self.target_pos = target._global_position
+        self.move = self._follow
 
     def __init__(self, final_target_pos: tuple[int, int], max_hp_range: tuple[int, int],
                  spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
@@ -301,13 +345,23 @@ class Native(Char):
         self._damage_anim_duration = damage_sequence.get_frames() * \
             damage_sequence.speed / 60.0
 
-        # Sets `HurtBox`
+        # Sets the `HurtBox`
         hurt_box: HurtBox = HurtBox(
             PhysicsLayers.NATIVES_BODIES, health=randint(*max_hp_range))
         hurt_box.collision_mask = PhysicsLayers.PLANTS_VIEW
         hurt_box.connect(hurt_box.hitted, self, self._on_hurtted)
         hurt_box.connect(hurt_box.health_depleated, self,
                          self._on_health_depleated)
+
+        # Sets the "attack box"
+        atk_box: Area = Area('AtkBox', color=(250, 100, 50))
+        atk_shape: Shape = Shape()
+        atk_shape.set_rect(Rect(VECTOR_ZERO, animations.image.get_size()))
+        atk_box.collision_layer = PhysicsLayers.NATIVES_HITBOX
+        atk_box.collision_mask = 0
+        atk_box.add_child(atk_shape)
+        atk_box.connect(atk_box.body_entered, self, self.attack)
+        self.atk_box = atk_box
 
         shape: Shape = Shape()
         shape.set_rect(Rect(VECTOR_ZERO, array(
@@ -319,8 +373,9 @@ class Native(Char):
         view_range: Area = Area('View', color=Color(145, 135, 25))
         view_range.collision_layer = PhysicsLayers.NATIVES_VIEW
         view_range.collision_mask = 0
-        view_range.connect(view_range.body_entered, self,
-                           self._on_Area_enter_view)
+        self.view_range = view_range
+        view_range.connect(view_range.body_entered, self, self._on_Area_enter_view)
+        view_range.connect(view_range.body_exited, self, self._on_Area_exit_view)
 
         view: CircleShape = CircleShape(
             radius=self.sprite.atlas.rect.size[X] * 4)
@@ -331,13 +386,14 @@ class Native(Char):
         shape.set_rect(Rect(VECTOR_ZERO, array(
             self.sprite.atlas.base_size) - (16, 10)))
 
-        self.connect(self.body_entered, self, self._on_Body_collided)
+        self.connect(self.body_entered, self, self.attack)
 
         self.add_child(shape, 0)
         self.add_child(hurt_box, 1)
+        self.add_child(atk_box, 2)
         self.add_child(view_range)
-        self.current_target: Node = property(
-            lambda _self: _self.target, self.set_target)
+
+    current_target: Node = property(lambda _self: _self.target, set_target)
 
 
 class Hermiga(Native):

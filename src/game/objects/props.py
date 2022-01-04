@@ -39,6 +39,9 @@ class Ship(Prop):
         if value == 0:
             self.brokenned.emit()
 
+    def take_damage(self, value: int) -> None:
+        self.set_durability(self._durability - value)
+
     def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
                  name: str = 'Ship', coords: tuple[int, int] = VECTOR_ZERO,
                  color: Color = Color('#394b5a')) -> None:
