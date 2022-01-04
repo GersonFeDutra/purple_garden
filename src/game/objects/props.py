@@ -70,3 +70,13 @@ class Ship(Prop):
         self.add_child(self.durability_bar)
 
     durability: int = property(lambda _self: _self._durability, set_durability)
+
+
+# TODO
+class BioMass(Area):
+
+
+    def __init__(self, name: str = 'Area', coords: tuple[int, int] = VECTOR_ZERO) -> None:
+        super().__init__(name=name, coords=coords)
+
+        # rect: Rect = Rect()

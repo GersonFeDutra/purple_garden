@@ -161,3 +161,7 @@ class HurtBox(Area):
 
         self.connect(self.body_entered, self._on_HitBox_entered,
                      self._on_HitBox_entered)
+
+
+class Spawner(Node):
+    spawns: int = 0

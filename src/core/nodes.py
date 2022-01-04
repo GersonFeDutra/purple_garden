@@ -121,7 +121,7 @@ class Entity:
             if owner != self.owner:
                 raise Entity.Signal.NotOwner
 
-            if self._observers.pop(observer) == None:
+            if self._observers.pop(observer, None) == None:
                 raise Entity.Signal.NotConnected
 
         def disconnect_all(self, owner) -> None:
