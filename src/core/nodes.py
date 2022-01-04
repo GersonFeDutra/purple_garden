@@ -1258,7 +1258,7 @@ class Icon(BaseAtlas):
         self.set_texture(len(textures) - 1)
 
 
-class AtlasPage(BaseAtlas, ABC):
+class Atlas(BaseAtlas, ABC):
     _is_static: bool = True
     _is_paused: bool = False
     _play: Callable[[], None] = NONE_CALL
@@ -1297,7 +1297,7 @@ class AtlasPage(BaseAtlas, ABC):
             lambda _self: _self._is_paused, self.set_is_paused)
 
 
-class AtlasPage(AtlasPage):
+class AtlasPage(Atlas):
     '''Atlas com uma única sequência simples de animação, ou único sprite estático.'''
     sequence: TextureSequence
 
@@ -1380,7 +1380,7 @@ class AtlasPage(AtlasPage):
             self.get_textures, self.set_textures)
 
 
-class AtlasBook(AtlasPage):
+class AtlasBook(Atlas):
     '''Atlas composto por múltiplas animações de sprites.'''
     animations: dict[str, TextureSequence]
     _current_sequence: TextureSequence = None
@@ -1423,10 +1423,10 @@ class AtlasBook(AtlasPage):
         if new_frame == frames:
             return
         if new_frame > frames:
-            if self._owner:
-                self._owner.animation_finished.emit()
             self._is_static = True
             self._reset_play()
+            if self._owner:
+                self._owner.animation_finished.emit()
             return
 
         self._current_sequence.frame = new_frame
@@ -1537,6 +1537,9 @@ class Sprite(Node):
         root. sprites_groups[self.group].remove(self.atlas)
         super()._exit_tree()
 
+    def _process(self) -> None:
+        self.atlas.update()
+
     def _draw(self, target_pos: tuple[int, int], target_scale: tuple[float, float],
               offset: tuple[int, int]) -> None:
         global root
@@ -1550,7 +1553,6 @@ class Sprite(Node):
         # Draw sprite in order
         root.screen.blit(self.atlas.image, Rect(array(
             self.atlas.rect.topleft) + self._layer.offset(), self.atlas.rect.size))
-        self.atlas.update()
 
     def get_cell(self) -> ndarray:
         return array(self.atlas.base_size)

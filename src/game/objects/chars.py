@@ -246,8 +246,9 @@ class Native(Char):
         self._current_target: Node = None
         animations: AtlasBook = self.sprite.atlas
         self.animations = animations
-        self._damage_anim_duration = animations.animations[animation_damage].get_frames() * \
-            animations.sequence.speed / 60.0
+        damage_sequence: TextureSequence = animations.animations[animation_damage]
+        self._damage_anim_duration = damage_sequence.get_frames() * \
+            damage_sequence.speed / 60.0
 
         # Sets `HurtBox`
         hurt_box: HurtBox = HurtBox(

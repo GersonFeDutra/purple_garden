@@ -74,6 +74,7 @@ class GUI(Node):
 class Level(Node):
     '''Node that holds all "space related" nodes.
     That is the "world" and all objects that can be interected with.'''
+    DEFAULT_OFFSET: tuple[int, int] = -1, -1
     waved: Node.Signal
     wave_length_changed: Node.Signal
 
@@ -103,7 +104,7 @@ class Level(Node):
         self.elapsed_time += root.delta
 
         if self.elapsed_time >= self.spawn_frequency * (self.spawns + 1):
-            self._spawn_native(self)
+            self.spawn_native()
 
         try:
             self.wave_percent = self.elapsed_time / self.wave_length
@@ -131,12 +132,23 @@ class Level(Node):
             for j in range(from_tile[Y], to_tile[Y]):
                 bg.disable_tile(i, j)
 
-    def spawn_native(self, offset: tuple[int, int] = (-1, -1)) -> None:
+    def _spawn_native(self, offset:  tuple[int, int] = DEFAULT_OFFSET) -> None:
         spawn: Native = self.natives[randint(0, self.wave_n % 3)](
             self.center, spritesheet=self.spritesheet,
             spritesheet_data=self.spritesheet_data, name=f'Native{self.spawns}')
         self.bg.spawn_object(spawn, self.bg.get_random_edge_spot(offset))
         self.spawns += 1
+
+    def _dbg_spawn_native(self, offset: tuple[int, int] = DEFAULT_OFFSET) -> None:
+
+        if self.spawns >= 1:
+            return
+
+        self._spawn_native(array(self.bg.map_size) // 3)
+
+    @Node.debug(_dbg_spawn_native)
+    def spawn_native(self, offset: tuple[int, int] = DEFAULT_OFFSET) -> None:
+        self._spawn_native(self, offset)
 
     def __init__(self, size: tuple[int, int], spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
@@ -146,9 +158,6 @@ class Level(Node):
         self.wave_length_changed = Node.Signal(self, 'wave_length_changed')
         self.spritesheet = spritesheet
         self.spritesheet_data = spritesheet_data
-        self._spawn_native: Callable[[tuple[int, int]], None] = \
-            lambda self: self.spawn_native(array(self.bg.map_size) // 3) \
-            if IS_DEBUG_ENABLED else self.spawn_native
 
         # Level Setup
 
