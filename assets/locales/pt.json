@@ -40,5 +40,11 @@
 		"de suas habilidades para garantir a sua sobrevivência.\n",
 		"Bosta aventureiro! (boa sorte) Que a força prevaleça! [...]\n",
 		"Fim do relatório. Pressione ESCAPE para fechar."
-	]
+	],
+	"GAME_OVER": [
+		"Fim de jogo!\n",
+		"Pressione ESCAPE para retornar ao menu."
+	],
+	"OX_OVER": "Seu oxigênio acabou!\n",
+	"SHIP_DESTROYED": "Sua nave foi destruída!\n"
 }

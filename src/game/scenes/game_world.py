@@ -180,16 +180,30 @@ class Level(Node):
 class GameWorld(Node):
     '''First Game's Scene.'''
     map_limits: tuple[int, int]
+    game_over_display: GameOverDisplay
+    title_screen: tuple[type[Node], tuple, dict]
 
     def _on_Dialog_hided(self, dialog: PopupDialog) -> None:
         dialog.free()
 
-    def __init__(self, spritesheet: Surface,
-                 spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],
+    def _on_Ship_brokenned(self) -> None:
+        self.game_over_display.show(root.tr('SHIP_DESTROYED'))
+        self.game_over_display.connect(
+            self.game_over_display.game_resumed, self, self.on_Game_over_game_resumed)
+
+    def on_Game_over_game_resumed(self) -> None:
+        self.game_over_display.disconnect(
+            self.game_over_display.game_resumed, self)
+        root.current_scene = self.title_screen[0](
+            *self.title_screen[1], **self.title_screen[2])
+
+    def __init__(self, spritesheet: Surface, spritesheet_data: dict[str, list[dict]],
+                 sound_fxs: dict[str, Sound], title_screen: tuple[type[Node], tuple, dict],
                  default_font: font.Font, gui_font: font.Font, name: str = 'GameWorld',
                  coords: tuple[int, int] = VECTOR_ZERO) -> None:
         super().__init__(name=name, coords=coords)
         root.screen_color = colors.GRAY
+        self.title_screen = title_screen
 
         map_size: tuple[int, int] = array(root.get_screen_size()) * 3
         self.map_limits = map_size
@@ -197,7 +211,9 @@ class GameWorld(Node):
         # Construção da cena
         level: Level = Level(
             map_size, spritesheet, spritesheet_data, sound_fxs)
+        level.ship.connect(level.ship.brokenned, self, self._on_Ship_brokenned)
         gui: GUI = GUI(spritesheet, spritesheet_data, default_font, gui_font)
+        self.game_over_display = gui.game_over_display
 
         level_layer: CanvasLayer = CanvasLayer(name='LevelLayer')
         self.add_child(level_layer)

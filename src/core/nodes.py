@@ -1434,19 +1434,18 @@ class AtlasBook(AtlasPage):
 
     def play_once(self, name: str, owner=None, time_events: deque[float] = None,
                   from_time: float = 0.0) -> None:
-        '''Toca a animação determinada. ─ Veja: `set_current_animation`.
+        '''Toca a animação determinada.─ Veja: `set_current_animation`.
         Opcionalmente recebe o `Sprite` associado a este atlas:
-            --> Quando a animação for finalizada emite o sinal
+         -> Quando a animação for finalizada emite o sinal
             `animation_finished` no `owner` indicado;
-            --> O sinal `anim_event_triggered` será emitido no `owner`
+         -> O sinal `anim_event_triggered` será emitido no `owner`
             sempre que um dos tempos de `time_events` forem atingidos.
             Note que os tempos devem ser ordenados em
             uma fila para funcionar devidamente.
-        # WATCH -> Usar frames/segundo?
         Se `from_time` for indicado, começa a animação daquele ponto.
-            --> Note que a velocidade determina o tempo de passagem para cada
+         -> Note que a velocidade determina o tempo de passagem para cada
             frame da animação. Logo o tempo total == `speed * frames`.
-        '''
+        '''  # WATCH -> Usar frames/segundo?
         self._current_time = from_time
         self._current_sequence = self.animations[name]
         self._current_sequence.frame = int(from_time)
@@ -2009,13 +2008,14 @@ class ProgressBar(Panel):
                  bg_color: Color = colors.BLUE, bar_color: Color = colors.GREEN,
                  borders_color: Color = colors.RED, size: tuple[int, int] = (125, 25),
                  borders: tuple[int, int, int, int] = Panel.DEFAULT_BORDERS,
-                 v_grow: bool = False, flip: bool = False, allow_overflow: bool = False) -> None:
+                 v_grow: bool = False, flip: bool = False, allow_overflow: bool = False,
+                 progress: int = .5) -> None:
         super().__init__(name=name, coords=coords, bg_color=bg_color,
                          borders_color=borders_color, size=size, borders=borders)
         self.color = bg_color
         self.size = size
 
-        self._progress: float = .5
+        self._progress: float = progress
         self._grow_coord: int = int(v_grow)
 
         self._progress_filter: Callable[[float], float] = \
@@ -2362,7 +2362,7 @@ class Popup(Panel):
         if self._on_focus:
             input.remove_event(
                 self, KEYDOWN, K_ESCAPE, Popup.ESCAPE_EVENT)
-        
+
         if self._on_pause_game:
             root.pause(False)
 
@@ -3343,7 +3343,7 @@ class SceneTree(CanvasLayer):
     def set_current_scene(self, scene: Node) -> None:
 
         if self._current_scene:
-            self.remove_child(self._current_scene)
+            self._current_scene.free()
 
         self._current_scene = scene
         self.add_child(scene, 0)

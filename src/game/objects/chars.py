@@ -4,6 +4,7 @@ from src.core.nodes import *
 from ..consts import *
 from ..utils import HurtBox, Steering, spritesheet_slice
 from .plants import Plant, Rose, Violet
+from .props import Ship
 
 
 class Char(KinematicBody):
@@ -121,12 +122,14 @@ class Player(Char):
 
 
 class Native(Char):
+    atk: int
     final_target_pos: tuple[int, int]
     target_pos: tuple[int, int]
     animation_walk: str
     animation_attack: str
     animation_damage: str
     move: Callable[[float], None]
+    animations: AtlasBook
     target: Node = None
 
     _damage_anim_duration: float
@@ -162,9 +165,6 @@ class Native(Char):
         # super()._physics_process(factor)
         self._timer._process(root.delta)
 
-    def _attack(self, factor: float) -> None:
-        self
-
     def set_target(self, value: Node) -> None:
         self._current_target = value
         self.move = self._move if value is None else self._follow
@@ -172,9 +172,35 @@ class Native(Char):
     def _on_Body_collided(self, body: Body) -> None:
 
         if body.name == 'Ship':
-            self.move = self._attack
-            self.target = body
+            self.move = NONE_CALL
+            self._attack_ship(body)
             self.disconnect(self.body_entered, self)
+
+    def _attack_ship(self, ship: Ship) -> None:
+        '''Inicia a animação de ataque contra o navio.'''
+        self.target = ship
+        self.animations.play_once(
+            self.animation_attack, self.sprite, deque([self.animations.animations[self.animation_attack].get_frames() / 2.0]))
+        self.sprite.connect(self.sprite.anim_event_triggered,
+                            self, self._on_Anim_event_triggered, ship)
+
+    def _on_Anim_event_triggered(self, ship: Ship, time: float) -> None:
+        ship.durability -= self.atk
+        self.sprite.disconnect(self.sprite.anim_event_triggered, self)
+        self.sprite.connect(self.sprite.animation_finished,
+                            self, self._on_Anim_event_finished)
+
+    def _on_Anim_event_finished(self) -> None:
+        self.sprite.disconnect(self.sprite.animation_finished, self)
+
+        # Reinicia a animação
+        for body in self._last_colliding_bodies:
+            if body.name == 'Ship':
+                self._attack_ship(body)
+                return
+
+        self.connect(self.body_entered, self, self._on_Body_collided)
+        self.move = self._move
 
     def _on_Timer_timeout(self, move: Callable[[float], None], animation: str, timer: Timer) -> None:
         atlas: AtlasBook = self.sprite.atlas
@@ -219,6 +245,7 @@ class Native(Char):
         self.animation_attack = animation_attack
         self._current_target: Node = None
         animations: AtlasBook = self.sprite.atlas
+        self.animations = animations
         self._damage_anim_duration = animations.animations[animation_damage].get_frames() * \
             animations.sequence.speed / 60.0
 

@@ -15,6 +15,7 @@ class TitleScreen(Node):
     spritesheet_data: dict[str, list[dict]]
     sound_fxs: dict[str, Sound]
     default_font: font.Font
+    title_font: font.Font
     gui_font: font.Font
 
     selected_button: int
@@ -32,6 +33,7 @@ class TitleScreen(Node):
     credits: Popup
     tuto: PopupDialog
     current_focus: Popup = None
+    title_screen: Surface
 
     def _enter_tree(self) -> None:
         super()._enter_tree()
@@ -71,6 +73,8 @@ class TitleScreen(Node):
         root.clear_cached_locales()
         root.current_scene = GameWorld(
             self.spritesheet, self.spritesheet_data, self.sound_fxs,
+            (TitleScreen, (self.title_screen, self.spritesheet, self.spritesheet_data,
+            self.sound_fxs, self.default_font, self.gui_font, self.title_font), {}),
             self.default_font, self.gui_font)
 
     def _on_Language_pressed(self) -> None:
@@ -103,7 +107,9 @@ class TitleScreen(Node):
         if not self.on_focus:
             return
 
+        # Fecha o jogo
         pygame.quit()
+        exit()
 
     def _on_Popup_hidden(self) -> None:
 
@@ -140,6 +146,8 @@ class TitleScreen(Node):
         self.gui_font = gui_font
         self.buttons = []
         self.info = root.tr('INFOS')
+        self.title_screen = title_screen
+        self.title_font = title_font
         purple: Color = DEFAULT_POPUP
 
         # Title Screen

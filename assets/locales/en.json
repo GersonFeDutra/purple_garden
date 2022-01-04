@@ -40,5 +40,11 @@
 		"of your skills to ensure your survival.\n",
 		"Shit adventurer! (good luck) May the force prevail! [...]\n",
 		"End of report. Press ESCAPE to close."
-	]
+	],
+	"GAME_OVER": [
+		"Game Over!\n",
+		"Press SCAPE to return to menu."
+	],
+	"OX_OVER": "You ran out of oxygen!\n",
+	"SHIP_DESTROYED": "Your ship was destroyed!\n"
 }

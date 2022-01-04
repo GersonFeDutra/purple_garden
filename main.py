@@ -141,7 +141,8 @@ def main(*args) -> None:
             sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT),
         lambda: GameWorld(
             spritesheet, spritesheet_data,
-            sound_fxs, DEFAULT_FONT, GUI_FONT)
+            sound_fxs, (TitleScreen, (title_screen, spritesheet, spritesheet_data,
+            sound_fxs, DEFAULT_FONT, GUI_FONT, TITLE_FONT), {}), DEFAULT_FONT, GUI_FONT)
     )()
 
     # Runs the Engine
