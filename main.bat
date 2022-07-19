@@ -1,5 +1,3 @@
-#!/bin/bash
-
 pip install pytweening
 pip install pygame
 pip install numpy

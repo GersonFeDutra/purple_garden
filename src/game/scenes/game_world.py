@@ -148,7 +148,7 @@ class Level(Spawner):
 
     @Node.debug(_dbg_spawn_native)
     def spawn_native(self, offset: tuple[int, int] = DEFAULT_OFFSET) -> None:
-        self._spawn_native(self, offset)
+        self._spawn_native(offset)
 
     def __init__(self, size: tuple[int, int], spritesheet: Surface,
                  spritesheet_data: dict[str, list[dict]], sound_fxs: dict[str, Sound],

@@ -221,15 +221,24 @@ class Native(Char):
         self.target = target
         self.animations.play_once(self.animation_attack, self.sprite, deque(
             [self.animations.animations[self.animation_attack].get_frames() / 2.0]))
-        self.sprite.connect(self.sprite.anim_event_triggered, self,
-                            self._on_Anim_event_triggered, target)
+        
+        try:
+            self.sprite.connect(self.sprite.anim_event_triggered, self,
+                                self._on_Anim_event_triggered, target)
+        except Entity.Signal.AlreadyConnected:
+            return
 
     def _on_Anim_event_triggered(self, target: Union[Ship, Plant, Player], _time: float) -> None:
         self._state = Native.States.FINISHING_ATK
         target.take_damage(self.atk)
         self.sprite.disconnect(self.sprite.anim_event_triggered, self)
-        self.sprite.connect(self.sprite.animation_finished,
+
+        # FIXME
+        try:
+            self.sprite.connect(self.sprite.animation_finished,
                             self, self._on_Anim_event_finished)
+        except Entity.Signal.AlreadyConnected:
+            return
 
     def _on_Anim_event_finished(self) -> None:
         self.sprite.disconnect(self.sprite.animation_finished, self)
