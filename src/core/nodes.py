@@ -7,6 +7,7 @@ from pygame import Color, Surface, Vector2
 from pygame import sprite, draw, font, mouse, transform
 from pygame.locals import *
 from sys import exit, argv
+from os import path
 
 # Other imports
 import re
@@ -20,6 +21,7 @@ from collections import deque
 
 # Constants & Utils
 from .lib.vectors import *
+from .lib.env import *
 from .lib import colors
 from .lib.utils import *
 
@@ -43,7 +45,14 @@ def debug_call(cls: Callable, dbg_alt: Callable = None):
 
 # Decorator
 def debug_method(dbg_alt: Callable = None):
-    '''Decorador que faz o redirecionamento de uma função quando em modo de debug.'''
+    '''Decorador que faz o redirecionamento de uma função quando em modo de debug.
+        Se o modo de debug não está ativo, retorna um método vazio, por padrão.
+        Caso desejado usar um método alternativo passe a callback como parâmetro da annotation. Ex.:
+            # Emite uma mensagem de log, direcionada de acordo com o modo de execução.
+            @debug_method(print)
+            def log(s: str) -> None:
+                ...
+    '''
     def inner_function(function):
         if dbg_alt:
             # Redireciona para o alternativo.
@@ -2801,7 +2810,7 @@ class RichTextLabel(Control):
             if match.start() != parser_index:
                 add_text(parser_index, match.start())
 
-            span: tuple = match.span()
+            span: tuple[int, int] = match.span()
             metadata.append({'type': filter(match), 'span': span})
             parser_index = span[1]
 
@@ -3167,16 +3176,23 @@ class SceneTree(CanvasLayer):
     FOCUS_ACTION_DOWN: str = 'focus_action_down'
     FOCUS_ACTION_UP: str = 'focus_action_up'
     _current_focus: BaseButton = None
+    
+    # Caminhos para os diretórios de usuário
+    user_dir: str # Diretório de save-data
+    shared_dir: str # Diretório de dados compartilhados
+    tmp_dir: str # Diretório de arquivos temporários
 
     class AlreadyInGroup(Exception):
         '''Chamado ao tentar adicionar o nó a um grupo ao qual já pertence.'''
         pass
 
-    def start(self, title: str = 'Game', screen_size: tuple[int, int] = None,
-              gui_font: font.Font = None) -> None:
+    def start(self, title: str = 'GamePy', screen_size: tuple[int, int] = None,
+              gui_font: font.Font = None, window_title: str = None) -> None:
         '''Setups the basic settings.'''
         self.clock = pygame.time.Clock()
 
+        if window_title is None:
+            window_title = title
         if screen_size is not None:
             self.screen_size = screen_size
 
@@ -3186,7 +3202,18 @@ class SceneTree(CanvasLayer):
         self._setup_log()
         self.screen = pygame.display.set_mode(self.screen_size)
         #alpha_layer = Surface(SCREEN_SIZE, pygame.SRCALPHA)
-        pygame.display.set_caption(title)
+        pygame.display.set_caption(window_title)
+        
+        # Filtra mantendo apenas caracteres alfanuméricos da string passada como title
+        # Substitui espaços do título por _ (underscore)
+        dir_name: str = re.sub(r'[^a-zA-Z0-9_]*', '', title.replace(' ', '_'))
+
+        if not dir_name:
+            dir_name = 'GamePy'
+
+        self.user_dir = path.join(USER_DIR, dir_name)
+        self.shared_dir = path.join(SHARED_DIR, dir_name)
+        self.tmp_dir = path.join(TMP_DIR, dir_name)
 
     def run(self) -> None:
         '''Game's Main Loop.'''
