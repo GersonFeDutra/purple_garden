@@ -106,32 +106,45 @@ def main(*args) -> None:
 
     # Setup Game's Content
 
-    # Loading Resources
+    # Paths
     ROOT_DIR: str = path.dirname(__file__)
     ASSETS_DIR: str = path.join(ROOT_DIR, 'assets')
     LOCALES_DIR: str = path.join(ASSETS_DIR, 'locales')
     SPRITES_DIR: str = path.join(ASSETS_DIR, 'sprites')
     SOUNDS_DIR: str = path.join(ASSETS_DIR, 'sounds')
     FONTS_DIR: str = path.join(ASSETS_DIR, 'fonts')
-
-    GUI_FONT: font.Font = font.SysFont('roboto', 20, False, False)
-    DEFAULT_FONT: font.Font = font.SysFont('roboto', 40, False, False)
-    TITLE_FONT: font.Font = font.SysFont('roboto', 90, False, False)
-    PIXELATED_FONT: str = path.join(
+    ## Files
+    PIXELATED_FONT_PATH: str = path.join(
         FONTS_DIR, 'basis33', 'basis33.ttf')
-    GUI_FONT: font.Font = font.Font(PIXELATED_FONT, 20)
-    DEFAULT_FONT: font.Font = font.Font(PIXELATED_FONT, 40)
-    TITLE_FONT: font.Font = font.Font(PIXELATED_FONT, 90)
+
 
     # Setup the Engine
     root.start(TITLE, screen_size=BASE_SIZE * array(
-        SPRITES_SCALE, dtype=int), gui_font=GUI_FONT)
+        SPRITES_SCALE, dtype=int))
+
 
     # Set log-file location
     _log_dir = path.join(root.user_dir, 'log')
     LOG_FILE_PATH = path.join(_log_dir,
             time.asctime(time.localtime(time.time())).replace(' ', '_') ) + '.log'
-    
+
+
+    # Loading Resources
+
+    ## Fonts
+    GUI_FONT: font.Font
+    DEFAULT_FONT: font.Font
+    TITLE_FONT: font.Font
+    try:
+        GUI_FONT = font.Font(PIXELATED_FONT_PATH, 20)
+        DEFAULT_FONT = font.Font(PIXELATED_FONT_PATH, 40)
+        TITLE_FONT = font.Font(PIXELATED_FONT_PATH, 90)
+    except FileNotFoundError:
+        log(f'Font file [{PIXELATED_FONT_PATH}] not found! Trying to use fallback [roboto]:')
+        GUI_FONT = font.SysFont('roboto', 20, False, False)
+        DEFAULT_FONT = font.SysFont('roboto', 40, False, False)
+        TITLE_FONT = font.SysFont('roboto', 90, False, False)
+
     # Cleans log folder
     # if path.exists(_log_dir):
     #     for f in listdir(_log_dir):
@@ -175,7 +188,13 @@ def main(*args) -> None:
 
     # TODO -> Remover sons
     for sfx in ['death', 'score', 'jump']:
-        sound_fxs[sfx] = Sound(path.join(SOUNDS_DIR, f'{sfx}.wav'))
+        sfx_path: str = path.join(SOUNDS_DIR, f'{sfx}.wav')
+
+        try:
+            sound_fxs[sfx] = Sound(sfx_path)
+        except FileNotFoundError:
+            sound_fxs[sfx] = None
+            log(f'Sound file [{sfx_path}] not found!')
 
     # Sets the first scene.
     root.current_scene = debug_call(
